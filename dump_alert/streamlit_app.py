@@ -11,6 +11,7 @@ Needs an Alchemy API key: ALCHEMY_API_KEYS (several keys, rotated) or ALCHEMY_AP
 environment variables, or entered in the sidebar (several allowed, comma separated).
 """
 import html
+import math
 import os
 import sys
 import time
@@ -39,9 +40,11 @@ _drop_stale_modules()
 _import_t = time.time()
 
 import altair as alt  # noqa: E402
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
+from dump_alert import ranges as rg  # noqa: E402
 from dump_alert.analogs import GROUP_LABEL  # noqa: E402
 from dump_alert.fetch import Fetcher, QuotaError, data_path, eth_usd, make_rpc, parse_keys  # noqa: E402
 from dump_alert.levels import ZONE  # noqa: E402
@@ -180,6 +183,20 @@ table.hl .yes {{ color:var(--good-t); }} table.hl .no {{ color:var(--muted); }}
 .hl-kv .k {{ color:var(--muted); }}
 .hl-kv .v b {{ color:var(--text); }}
 @media (max-width:640px) {{ .hl-kv {{ grid-template-columns:1fr; gap:2px 0; }} .hl-kv .k {{ margin-top:8px; }} }}
+[data-testid="stNumberInputContainer"], [data-testid="stNumberInput"] [data-baseweb="input"] {{
+        background:var(--panel2) !important; border:1px solid var(--border) !important; border-radius:8px !important; }}
+[data-testid="stNumberInput"] input {{ background:var(--panel2) !important; color:var(--text) !important;
+        -webkit-text-fill-color:var(--text) !important; font-family:var(--mono) !important; caret-color:var(--accent); }}
+[data-testid="stNumberInputStepDown"], [data-testid="stNumberInputStepUp"] {{ background:var(--panel2) !important;
+        color:var(--muted) !important; border:none !important; }}
+[data-testid="stNumberInputStepDown"]:hover, [data-testid="stNumberInputStepUp"]:hover {{ color:var(--accent) !important; }}
+.hl-conc {{ background:var(--panel2); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px;
+        padding:10px 14px; margin:12px 0 4px; font-size:14px; color:var(--text); line-height:1.5; }}
+.hl-conc .lab {{ display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent);
+        font-weight:600; margin-bottom:2px; }}
+.hl-conc.good {{ border-left-color:var(--good); }} .hl-conc.good .lab {{ color:var(--good-t); }}
+.hl-conc.warn {{ border-left-color:var(--warn); }} .hl-conc.warn .lab {{ color:var(--warn-t); }}
+.hl-conc.bad {{ border-left-color:var(--bad); }} .hl-conc.bad .lab {{ color:var(--bad-t); }}
 </style>
 """
 
@@ -285,6 +302,16 @@ def section(title, sub=None):
     ui(f'<div class="hl-h">{h(title)}</div>' + (f'<p class="hl-small" style="margin:-4px 0 8px">{sub}</p>' if sub else ""))
 
 
+def pct1(v):
+    """Percent with one decimal (range results are often small)."""
+    return f"{v * 100:+.1f}%"
+
+
+def conclude(text, kind="info"):
+    """Conclusion box at the end of an analysis (text may contain <b>; dynamic parts already escaped)."""
+    ui(f'<div class="hl-conc {kind}"><span class="lab">Conclusion</span>{text}</div>')
+
+
 def bullets(items):
     if items:
         ui('<ul class="hl-list">' + "".join(f'<li class="{c}">{h(t)}</li>' for c, t in items) + "</ul>")
@@ -300,6 +327,7 @@ def short_names(names, n=3):
     return names_text(names) if len(names) <= n else ", ".join(names[:n]) + f" and {len(names) - n} more"
 
 
+CHART_W = 840  # plot width of fixed-width charts (fits the 960px column with axes)
 AXIS = dict(labelColor=MUTED, titleColor=MUTED, gridColor=BORDER, domainColor=BORDER, tickColor=BORDER,
             labelFont="JetBrains Mono, ui-monospace, monospace", titleFontWeight="normal", labelFontSize=11,
             titleFontSize=11)
@@ -346,7 +374,7 @@ def chart(a):
         layers += [alt.Chart(lv).mark_rule(color=MUTED, strokeDash=[4, 4], strokeWidth=1).encode(y="y:Q"),
                    alt.Chart(lv).mark_text(align="left", dx=4, dy=-6, color=MUTED, fontSize=11).encode(
                        y="y:Q", text="label:N", x=alt.value(0))]
-    price = alt.layer(*layers).properties(height=260)
+    price = alt.layer(*layers).properties(height=260, width=CHART_W)
     whale = alt.layer(
         base.mark_line(strokeWidth=2, color=ACCENT).encode(
             y=alt.Y("whale6h:Q", title="Whales sold(+)/bought(−) %",
@@ -354,60 +382,145 @@ def chart(a):
         alt.Chart(pd.DataFrame({"y": [1.5]})).mark_rule(color=STATUS["AVOID"], strokeDash=[4, 4]).encode(y="y:Q"),
         alt.Chart(pd.DataFrame({"y": [1.5], "label": ["danger line: whales sold 1.5%"]})).mark_text(
             align="left", dx=4, dy=-6, color=MUTED, fontSize=11).encode(y="y:Q", text="label:N", x=alt.value(0)),
-    ).properties(height=110)
+    ).properties(height=110, width=CHART_W)
     strip = alt.Chart(df).mark_rect().encode(
         x=x, x2="until:T",
         color=alt.Color("verdict:N", legend=None, scale=alt.Scale(domain=list(STATUS), range=list(STATUS.values()))),
         tooltip=[alt.Tooltip("time:T", title="Time (UTC)", format="%d %b %H:%M"), "verdict:N"],
-    ).properties(height=22)
+    ).properties(height=22, width=CHART_W)
     ch = (alt.vconcat(price, whale, strip, spacing=8).resolve_scale(x="shared")
           .configure(background="transparent", font="Inter, system-ui, sans-serif")
           .configure_view(strokeWidth=0).configure_axis(**AXIS))
     return ch, df
 
 
-def depth_chart(a, lv):
-    """LP liquidity per 1% price drop (all pools), with support zones as shaded bands."""
-    dep, supply, usd = lv["depth"], a["supply"], a["usd"]
-    px = a["now"]["px"]
-    span = 80
-    df = pd.DataFrame({
-        "d0": list(range(0, span)), "d1": list(range(1, span + 1)),
-        "liq": dep["band"][1:span + 1], "cum": dep["usd"][1:span + 1],
-        "mcap": [px * (1 - d / 100) * supply * (usd or 1) for d in range(1, span + 1)],
-    })
-    df["label"] = [f"down {d0}–{d1}%" for d0, d1 in zip(df["d0"], df["d1"])]
-    x = alt.X("d0:Q", title="Price drop from now", scale=alt.Scale(domain=[0, span], nice=False),
-              axis=alt.Axis(values=list(range(0, span + 1, 10)), grid=False,
-                            labelExpr="datum.value == 0 ? '0' : '−' + datum.value + '%'"))
-    tip = [alt.Tooltip("label:N", title="Price"), alt.Tooltip("liq:Q", title="Liquidity in this 1% band (USD)", format="$,.0f"),
-           alt.Tooltip("cum:Q", title="Total selling needed to get here (USD)", format="$,.0f"),
-           alt.Tooltip("mcap:Q", title="Market cap at this level" + (" (USD)" if usd else ""), format=",.0f")]
-    rows, last = [], None
+# Liquidity profile colors, validated for the dark panel (CVD ΔE 12.9, contrast ≥ 3:1): buy-side (below price)
+# and sell-side (above price) LP liquidity; traded volume is a single neutral series in its own panel.
+BID, ASK, VOL_C = "#2FA898", "#9085E9", "#5F737A"
+BELOW, ABOVE = "Below price: absorbs selling", "Above price: absorbs buying"
+# diverging ramp for the range map (red = loses money, blue = grows), neutral gray midpoint
+DIV_NEG, DIV_MID, DIV_POS = "#E66767", "#383835", "#3987E5"
+
+
+def pct_label(axis_values="datum.value"):
+    return (f"{axis_values} > 0 ? '+' + {axis_values} + '%' : {axis_values} == 0 ? 'now' : "
+            f"'−' + (-{axis_values}) + '%'")
+
+
+def liquidity_profile(a, lv, band=2, down=80):
+    """Vertical liquidity profile (like VPVR): LP liquidity in each 2% price band below and above the current
+    price, next to what traded at those prices in the last 7 days. Support zones and the best range on top."""
+    dep, supply, usd, qu = lv["depth"], a["supply"], a["usd"], a["quote"]
+    k, px = usd or 1, a["now"]["px"]
+    rec = a.get("best_range")
+    best = rec["best"]["range"] if rec and not rec["skip"] else None
+    up_usd = dep.get("up_usd")
+    up = 0
+    if up_usd:
+        want = 40 if not best or rg.is_full(best) else max(40, best[1] + 10)
+        up = min(len(up_usd) - 1, want, 160) // band * band
+    rows = []
+    for d0 in range(0, down, band):
+        rows.append({"y0": -d0 - band, "y1": -d0, "liq": dep["usd"][d0 + band] - dep["usd"][d0], "side": BELOW,
+                     "band": f"−{d0}% to −{d0 + band}%", "cum": dep["usd"][d0 + band],
+                     "mcap": px * (1 - (d0 + band / 2) / 100) * supply * k})
+    for u0 in range(0, up, band):
+        rows.append({"y0": u0, "y1": u0 + band, "liq": up_usd[u0 + band] - up_usd[u0], "side": ABOVE,
+                     "band": f"+{u0}% to +{u0 + band}%", "cum": up_usd[u0 + band],
+                     "mcap": px * (1 + (u0 + band / 2) / 100) * supply * k})
+    df = pd.DataFrame(rows)
+    df["cum_label"] = ["Selling needed to get here" if s == BELOW else "Buying needed to get here" for s in df["side"]]
+    vol = lv.get("volume") or {}
+    vdf = pd.DataFrame([{"y0": b, "y1": b + band, "vol": vol.get(b, 0.0) * k,
+                         "band": (f"+{b}% to +{b + band}%" if b >= 0 else f"−{-b - band}% to −{-b}%")}
+                        for b in range(-down, up, band)])
+    lo_y = -down
+    xmax = max(df["liq"].max(), 1.0) * 1.5   # free space on the right for the labels
+    y = alt.Y("y0:Q", title="Price vs now", scale=alt.Scale(domain=[lo_y, max(up, 4)], nice=False),
+              axis=alt.Axis(values=list(range(lo_y, up + 1, 10)), labelExpr=pct_label(), grid=False))
+    tip = [alt.Tooltip("band:N", title="Price band"),
+           alt.Tooltip("mcap:Q", title="Market cap here" + (" (USD)" if usd else f" ({qu})"), format=",.0f"),
+           alt.Tooltip("liq:Q", title="LP liquidity in this band (USD)", format="$,.0f"),
+           alt.Tooltip("cum:Q", title="Total to push price here (USD)", format="$,.0f")]
+    over = []
+    if best and not rg.is_full(best):
+        rng = pd.DataFrame([{"y0": -best[0], "y1": min(best[1], up) if up else 0}])
+        over.append(alt.Chart(rng).mark_rect(color=MINT, opacity=0.07).encode(y="y0:Q", y2="y1:Q", x=alt.datum(0),
+                                                                               x2=alt.datum(xmax)))
+        edges = pd.DataFrame([{"y": -best[0], "label": f"Best range low −{best[0]:g}%"}]
+                             + ([{"y": best[1], "label": f"Best range high +{best[1]:g}%"}] if best[1] <= up else []))
+        over.append(alt.Chart(edges).mark_rule(color=MINT, strokeDash=[4, 4], strokeWidth=1).encode(y="y:Q"))
+        over.append(alt.Chart(rng).mark_rule(color=MINT, strokeWidth=4).encode(y="y0:Q", y2="y1:Q", x=alt.datum(xmax)))
+    # labels on the right edge; drop a label when it would collide with a more important one (≥ 4% apart)
+    labels = [(0, f"now · {money(px * supply, usd, qu)}", 0)]
+    if best and not rg.is_full(best):
+        labels += [(-best[0], f"best range low −{best[0]:g}%", 1)] + ([(best[1], f"best range high +{best[1]:g}%", 1)]
+                                                                      if best[1] <= up else [])
+    zones = []
     for z in lv["zones"]:
-        mid = -z["drop"] * 100
-        if mid >= span:
+        mid = z["drop"] * 100
+        if mid <= lo_y:
             continue
-        row = 1 - rows[-1]["row"] if last is not None and mid - last < 9 else 0  # close labels: alternate rows
-        rows.append({"a": max(0.0, (1 - (1 + z["drop"]) * (1 + ZONE)) * 100),
-                     "b": min(span, (1 - (1 + z["drop"]) * (1 - ZONE)) * 100),
-                     "mid": mid, "row": row, "y": 10 + 14 * row, "label": f"{pct(z['drop'])} {z['strength']}"})
-        last = mid
-    zones = pd.DataFrame(rows)
-    layers = []
-    if len(zones):
-        layers += [alt.Chart(zones).mark_rect(color=MINT, opacity=0.10).encode(x="a:Q", x2="b:Q"),
-                   alt.Chart(zones).mark_text(color=TEXT, fontSize=11, baseline="middle").encode(
-                       x="mid:Q", y=alt.Y("y:Q", scale=None), text="label:N")]
-    # 2px gap between bars (x2Offset), rounded data ends
-    bars = alt.Chart(df).mark_bar(color=ACCENT, cornerRadiusTopLeft=2, cornerRadiusTopRight=2, x2Offset=-2).encode(
-        x=x, x2="d1:Q", y=alt.Y("liq:Q", title="Liquidity per 1% (USD)", axis=alt.Axis(format="$~s"),
-                                scale=alt.Scale(domain=[0, max(df["liq"].max(), 1) * 1.3])),  # room for zone labels
-        y2=alt.datum(0), tooltip=tip)
-    ch = (alt.layer(*layers, bars).properties(height=220)
+        zones.append({"y0": max(lo_y, ((1 + z["drop"]) * (1 - ZONE) - 1) * 100), "y1": ((1 + z["drop"]) * (1 + ZONE) - 1) * 100})
+        labels.append((mid, f"{pct(z['drop'])} {z['strength']} · {money(z['price'] * supply, usd, qu)}",
+                       {"strong": 2, "medium": 3, "weak": 4}[z["strength"]]))
+    kept = []
+    for yv, text, pri in sorted(labels, key=lambda x: x[2]):
+        if all(abs(yv - kv) >= 4 for kv, _, _ in kept):
+            kept.append((yv, text, pri))
+    if zones:
+        over.insert(0, alt.Chart(pd.DataFrame(zones)).mark_rect(color=MINT, opacity=0.10).encode(
+            y="y0:Q", y2="y1:Q", x=alt.datum(0), x2=alt.datum(xmax)))
+    now = alt.Chart(pd.DataFrame([{"y": 0}])).mark_rule(color=TEXT, strokeWidth=1).encode(y="y:Q")
+    lab = alt.Chart(pd.DataFrame([{"y": yv, "label": t} for yv, t, _ in kept])).mark_text(
+        align="right", baseline="bottom", dx=-4, dy=-2, color=TEXT, fontSize=11).encode(y="y:Q", text="label:N",
+                                                                                      x=alt.datum(xmax))
+    bars = alt.Chart(df).mark_bar(yOffset=-1, y2Offset=1, cornerRadiusEnd=3).encode(
+        y=y, y2="y1:Q", x=alt.X("liq:Q", title=f"LP liquidity per {band}% band (USD)", axis=alt.Axis(format="$~s", tickCount=5),
+                                scale=alt.Scale(domain=[0, xmax], nice=False)), x2=alt.datum(0),
+        color=alt.Color("side:N", scale=alt.Scale(domain=[BELOW, ABOVE], range=[BID, ASK]),
+                        legend=alt.Legend(orient="top", title=None, labelColor=TEXT, labelFontSize=12, symbolType="square")),
+        tooltip=tip)
+    left = alt.layer(*over, bars, now, lab).properties(width=560, height=470)
+    vmax = max(vdf["vol"].max(), 1.0) * 1.1
+    vbars = alt.Chart(vdf).mark_bar(yOffset=-1, y2Offset=1, cornerRadiusEnd=3, color=VOL_C).encode(
+        y=alt.Y("y0:Q", scale=alt.Scale(domain=[lo_y, max(up, 4)], nice=False), axis=None), y2="y1:Q",
+        x=alt.X("vol:Q", title="Traded here, last 7 days (USD)", axis=alt.Axis(format="$~s", tickCount=3),
+                scale=alt.Scale(domain=[0, vmax], nice=False)), x2=alt.datum(0),
+        tooltip=[alt.Tooltip("band:N", title="Price band"), alt.Tooltip("vol:Q", title="Traded, 7 days (USD)", format="$,.0f")])
+    right = alt.layer(vbars, now).properties(width=200, height=470)
+    ch = (alt.hconcat(left, right, spacing=10).resolve_scale(y="shared")
           .configure(background="transparent", font="Inter, system-ui, sans-serif")
           .configure_view(strokeWidth=0).configure_axis(**AXIS))
     return ch, df
+
+
+def range_map(rec):
+    """Heatmap: growth per night for each lower × upper bound, best cell outlined."""
+    lo, hi, heat = rec["lo"], rec["hi"], rec["heat"]
+    rows = [{"lower": f"−{l}%", "upper": f"+{u}%", "g": heat[i][j], "range": f"−{l}% / +{u}%"}
+            for i, l in enumerate(lo) for j, u in enumerate(hi)]
+    df = pd.DataFrame(rows)
+    m = max(abs(df["g"].min()), abs(df["g"].max()), 0.002)
+    best = rec["best"]["range"]
+    xs, ys = [f"+{u}%" for u in hi], [f"−{l}%" for l in lo]
+    base = alt.Chart(df).encode(x=alt.X("upper:O", sort=xs, title="Upper bound", axis=alt.Axis(labelAngle=0)),
+                                y=alt.Y("lower:O", sort=ys, title="Lower bound"))
+    cells = base.mark_rect(stroke=PANEL, strokeWidth=2, cornerRadius=2).encode(
+        color=alt.Color("g:Q", scale=alt.Scale(domain=[-m, 0, m], range=[DIV_NEG, DIV_MID, DIV_POS]),
+                        legend=alt.Legend(title="Growth / night", format="+.1%", labelColor=MUTED, titleColor=MUTED,
+                                          gradientLength=160)),
+        tooltip=[alt.Tooltip("range:N", title="Range"), alt.Tooltip("g:Q", title="Growth per night", format="+.2%")])
+    layers = [cells]
+    if not rg.is_full(best):
+        b = df[(df["lower"] == f"−{best[0]}%") & (df["upper"] == f"+{best[1]}%")]
+        layers += [alt.Chart(b).mark_rect(fill=None, stroke=TEXT, strokeWidth=2, cornerRadius=2).encode(
+            x=alt.X("upper:O", sort=xs), y=alt.Y("lower:O", sort=ys)),
+            alt.Chart(b).mark_text(color=TEXT, fontSize=10, fontWeight="bold", text="best").encode(
+                x=alt.X("upper:O", sort=xs), y=alt.Y("lower:O", sort=ys))]
+    return (alt.layer(*layers).properties(height=330)
+            .configure(background="transparent", font="Inter, system-ui, sans-serif")
+            .configure_view(strokeWidth=0).configure_axis(**AXIS))
 
 
 # ---------------------------------------------------------------- sections
@@ -441,6 +554,30 @@ def usdg_section(a):
                'almost equal (arbitrage), so the verdict applies to all of them; what differs is the fee and depth.</p>')
 
 
+def summary_section(a):
+    """The conclusions of the main analyses in one box, right under the verdict."""
+    cells = []
+    p, hours = a["model_p"], f"{a['sleep_h']:g}h"
+    if p is not None:
+        cells.append(("Dump risk", f"<b>{p * 100:.0f}%</b> chance of a ≥30% drop within {hours}"
+                      + (f" · {a['analogs']['n30']} of {a['analogs']['n']} similar moments dumped" if a.get("analogs") else "")))
+    rec = a.get("best_range")
+    if rec:
+        b = rec["best"]
+        cells.append(("Best range", f"<b>skip</b> — no range came out ahead at today's fee level ({rec['fee']['r'] * 100:.2f}%/day)"
+                      if rec["skip"] else f"<b>{h(b['label'])}</b> · average {pct1(b['mean'])}, bad case {pct1(b['p10'])} over {hours}"))
+    lv = a.get("levels") or {}
+    firm = [z for z in lv.get("zones", []) if z["strength"] in ("strong", "medium") and z["drop"] >= -0.5]
+    if firm:
+        cells.append(("First support", f"<b>{pct(firm[0]['drop'])}</b> ({firm[0]['strength']}, {firm[0]['touches']} bounce{'' if firm[0]['touches'] == 1 else 's'})"))
+    w = lv.get("whale")
+    if w and w["drop1"] is not None:
+        cells.append(("Whale risk", f"largest wallet selling all → <b>{pct(-w['drop1'])}</b>"))
+    if cells:
+        ui('<div class="hl-card"><div class="hl-kv" style="margin:0">' + "".join(
+            f'<div class="k">{k}</div><div class="v">{v}</div>' for k, v in cells) + "</div></div>")
+
+
 def risk_section(a):
     """Three independent estimates of the dump risk while you sleep."""
     cal, q, p = a["calib"], a["analogs"], a["model_p"]
@@ -472,6 +609,17 @@ def risk_section(a):
        'a hard danger sign from the rules always means at least CAUTION. <b>Similar past moments</b> = the closest matching '
        'hours in the sample coins and what happened next. The last tile shows how often a dump really followed this '
        'verdict when the tool was tested on coins it had not seen.</p>')
+    if p is not None:
+        band = 0 if p < 0.15 else 1 if p < 0.35 else 2
+        word = ("Low", "Elevated", "High")[band]
+        txt = f"<b>{word} dump risk</b>: the model puts a ≥30% drop within {hours} at {p * 100:.0f}%"
+        if q is not None:
+            qb = 0 if q["p30"] < 0.15 else 1 if q["p30"] < 0.35 else 2
+            txt += (f", and {q['n30']} of {q['n']} similar past moments dumped. "
+                    + ("Both angles agree." if qb == band else "The two angles disagree, so treat the number as uncertain."))
+        else:
+            txt += "."
+        conclude(txt, LEVEL_CLASS[band])
 
 
 def b_lo(b):
@@ -494,21 +642,33 @@ def reasons_section(a):
         ui(f'<p class="hl-small">The same situation ({h(s["desc"])}) happened {s["n"]} times in the reference coins: '
            f'the typical low over the next 8h was {pct(s["median_dd"])}, and price fell ≥30% in {s["p30"] * 100:.0f}% '
            'of cases.</p>')
+    hard = [x for x in a["filters"] if x["hit"] and x["keras"]]
+    parts = []
+    if a["factors"]:
+        parts.append("the model's biggest worries are " + "; ".join(h(x) for x in a["factors"]))
+    if hard:
+        parts.append(f"{len(hard)} hard danger sign{'s' if len(hard) > 1 else ''} on, so the verdict is at least CAUTION")
+    if a["calm_factors"]:
+        parts.append("on the calm side: " + "; ".join(h(x) for x in a["calm_factors"][:2]))
+    txt = f"<b>{a['verdict']}</b> — " + ("; ".join(parts) if parts else "no danger sign is active and the model sees little risk")
+    conclude(txt + ".", LEVEL_CLASS[a["level"]])
 
 
 def liquidity_section(a):
-    """Real LP liquidity below the price + support zones from price action."""
+    """Real LP liquidity around the price (vertical profile) + support zones from price action."""
     lv = a.get("levels")
     if not lv or (not lv["zones"] and not lv["depth"]):
         return
     usd, qu, dep = a["usd"], a["quote"], lv["depth"]
-    section("Liquidity & support", "How much selling the pools can absorb below the current price, and price levels "
-                                   "where buyers stepped in before.")
+    section("Liquidity & support", "How much selling (and buying) the pools absorb around the current price, what "
+                                   "traded at each price, and where buyers stepped in before.")
     items = []
     if dep:
+        up = dep.get("up_usd")
         items.append(("info", f"To push the price down 10% / 30% / 50%, someone has to sell about ${compact(dep['usd'][10])} / "
-                              f"${compact(dep['usd'][30])} / ${compact(dep['usd'][50])} worth of tokens (LP liquidity in "
-                              f"{lv['n_pools']} USDG & ETH pools, which are linked by arbitrage)."))
+                              f"${compact(dep['usd'][30])} / ${compact(dep['usd'][50])} worth of tokens"
+                              + (f"; to push it up 10% / 30%, buy about ${compact(up[10])} / ${compact(up[30])}" if up and len(up) > 30 else "")
+                              + f" (LP liquidity in {lv['n_pools']} USDG & ETH pools, linked by arbitrage)."))
     w = lv.get("whale")
     if w and w["drop1"] is not None:
         items.append(("warn" if w["drop1"] >= 0.3 else "info",
@@ -523,10 +683,12 @@ def liquidity_section(a):
         items.append(("warn", "Part of the liquidity map was inconsistent (pools with special hooks); treat the numbers as rough."))
     bullets(items)
     if dep:
-        ch, _ = depth_chart(a, lv)
-        st.altair_chart(ch, theme=None, width="stretch")
-        ui('<p class="hl-small">Bars = USD of LP liquidity that absorbs selling in each 1% of price drop (all pools). '
-           'Shaded bands = support zones. Live snapshot, refreshed at most every 15 minutes.</p>')
+        ch, _ = liquidity_profile(a, lv)
+        st.altair_chart(ch, theme=None)
+        ui('<p class="hl-small">Left: USD of LP liquidity in each 2% price band — green below the price (it pays sellers, '
+           'so it slows a drop), purple above (it sells to buyers, so it slows a pump). Right: how much traded at each '
+           'price in the last 7 days. Shaded bands = support zones; the light band between dashed lines = the best range '
+           'below. Live snapshot, refreshed at most every 15 minutes.</p>')
     if lv["zones"]:
         rows = []
         for z in lv["zones"]:
@@ -545,9 +707,159 @@ def liquidity_section(a):
            f'(3+ = strong), plus thick LP liquidity. Tested on the sample coins, when price touched a zone within 24h: strong zones '
            f'held {r("strong")} of the time, medium {r("medium")}, weak {r("weak")}, and ordinary levels {r("plain")}. '
            'Supports help you place the lower bound; they are not a guarantee, and dump-prone coins break them often.</p>')
+    conclude(*liquidity_conclusion(a, lv))
+
+
+def liquidity_conclusion(a, lv):
+    usd, qu, dep, w = a["usd"], a["quote"], lv["depth"], lv.get("whale")
+    parts, kind = [], "info"
+    zs = [z for z in lv["zones"] if z["drop"] >= -0.5]
+    firm = [z for z in zs if z["strength"] in ("strong", "medium")]
+    if firm:
+        z = firm[0]
+        parts.append(f"first real floor: the {z['strength']} support at <b>{pct(z['drop'])}</b> "
+                     f"(mcap {h(money(z['price'] * a['supply'], usd, qu))}, {z['touches']} bounce{'' if z['touches'] == 1 else 's'} in 7 days)")
+        nxt = [x for x in firm[1:]]
+        if nxt:
+            parts[-1] += f", then {pct(nxt[0]['drop'])}"
+    elif zs:
+        parts.append(f"only weak supports nearby (closest {pct(zs[0]['drop'])}), so there is no proven floor")
+        kind = "warn"
+    else:
+        parts.append("no support zone within −50%")
+        kind = "warn"
+    if dep:
+        up = dep.get("up_usd")
+        if up and len(up) > 10 and dep["usd"][10]:
+            ratio = up[10] / dep["usd"][10]
+            side = ("about balanced" if 0.67 <= ratio <= 1.5 else "heavier above the price (pumps get sold into)"
+                    if ratio > 1.5 else "heavier below the price (dips get bought)")
+            parts.append(f"liquidity within ±10% is {side}")
+        if lv["holes"]:
+            a0, a1 = lv["holes"][0]
+            parts.append(f"a thin gap between {pct(a0)} and {pct(a1)} lets price slide fast")
+            kind = "warn"
+    if w and w["drop1"] is not None:
+        if w["drop1"] >= 0.3:
+            parts.append(f"whale risk is high: the largest wallet alone could push price down {w['drop1'] * 100:.0f}%")
+            kind = "bad" if w["drop1"] >= 0.5 else "warn"
+        else:
+            parts.append(f"the largest wallet could move price only {w['drop1'] * 100:.0f}%")
+    text = "; ".join(parts) + "."
+    return text[0].upper() + text[1:], kind
 
 
 def range_section(a):
+    """Best LP range from the current price, from the range research on the sample coins."""
+    rec, usd, f, qu = a.get("best_range"), a["usd"], a["now"], a["quote"]
+    if not rec:
+        return range_section_basic(a)
+    fy, best, hours = rec["fee"], rec["best"], f"{a['sleep_h']:g}h"
+    section("Best LP range from the current price",
+            f"Researched on {rec['coins']} sample coins: at every past hour that looked like now "
+            f"(same verdict and volatility, {rec['n']:,} moments), LP positions with 133 different ranges were opened and left "
+            f"for {hours}. Fees come from the real trading volume that followed, scaled to this pool's fee level today.")
+    fee_txt = (f"this pool's {fee_pct(fy['rate'])} fee × ${compact(fy['vol24'])} traded in 24h ÷ ${compact(fy['tvl'])} active "
+               f"liquidity ≈ <b>{fy['r'] * 100:.2f}% per day</b> for a full-range LP" if fy["rate"] is not None and not fy["assumed"]
+               else f"<b>{fy['r'] * 100:.2f}% per day</b> assumed")
+    ui(f'<div class="hl-note">Fee level now: {fee_txt}. Your ${compact(fy["position"])} position would be '
+       f'{fy["share"] * 100:.2f}% of the pool\'s liquidity' + (" — big enough to dilute your own fees" if fy["share"] > 0.05 else "")
+       + "." + ("".join(f" Note: {h(n)}." for n in fy["notes"])) + "</div>")
+    px, fdv = f["px"], f["px"] * a["supply"]
+    rng = best["range"]
+    if rec["skip"]:
+        ui('<div class="hl-alert warn">⚠️ <b>At this fee level, no range came out ahead</b> in similar past moments — '
+           'not opening is the best choice. If you still open one, the least-bad range is shown below.</div>')
+    if rg.is_full(rng):
+        lo_tile = ("Lower bound", "none", "", "full range")
+        hi_tile = ("Upper bound", "none", "", "full range")
+    else:
+        lo_tile = ("Lower bound (min price)", f"−{rng[0]:g}%", "warn-t",
+                   f"{price_str(px * (1 - rng[0] / 100), usd, qu)} · mcap {money(fdv * (1 - rng[0] / 100), usd, qu)}")
+        hi_tile = ("Upper bound (max price)", f"+{rng[1]:g}%", "pos",
+                   f"{price_str(px * (1 + rng[1] / 100), usd, qu)} · mcap {money(fdv * (1 + rng[1] / 100), usd, qu)}")
+    tiles([lo_tile, hi_tile,
+           (f"Average result ({hours})", pct1(best["mean"]), sign_class(best["mean"]),
+            f"fees {pct1(best['fees'])} · price {pct1(best['price'])}"),
+           ("Bad case (1 in 10)", pct1(best["p10"]), sign_class(best["p10"]),
+            f"loss >20%: {best['big_loss'] * 100:.1f}% of the time")])
+    if not rg.is_full(rng):
+        u = best["usdg"]
+        ui(f'<p class="hl-small" style="margin-bottom:8px">You start with about <b>{u * 100:.0f}% {pair_unit(a)}</b> and '
+           f'{(1 - u) * 100:.0f}% coin. If the price falls, the position buys the coin step by step; below −{rng[0]:g}% '
+           f'you hold only the coin. Above +{rng[1]:g}% you hold only {pair_unit(a)} — no loss, it just stops earning fees.</p>')
+    rows = []
+    seen = set()
+    opts = [("Best range", best), ("Best two-sided range", rec["two_sided"]), ("Full range", rec["full"])]
+    if rec["mine"]:
+        plan = "full range" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}%"
+        opts.append((f"Your plan ({plan})", rec["mine"]))
+    for name, c in opts:
+        if c["range"] in seen:
+            continue
+        seen.add(c["range"])
+        rows.append([name, c["label"], f"{c['usdg'] * 100:.0f}%", (pct1(c["mean"]), sign_class(c["mean"])),
+                     (pct1(c["median"]), sign_class(c["median"])), (pct1(c["p10"]), sign_class(c["p10"])),
+                     f"{c['big_loss'] * 100:.1f}%", pct1(c["fees"]), f"{c['inside'] * 100:.0f}%"])
+    table(["", "Range", f"Start in {pair_unit(a)}", f"Average ({hours})", "Typical", "Bad case (1 in 10)", "Loss > 20%",
+           "Fees", "In range at the end"], rows)
+    with st.expander("Range map: every lower × upper bound"):
+        st.altair_chart(range_map(rec), theme=None, width="stretch")
+        ui('<p class="hl-small">Each cell = growth per night if you opened that range in every similar moment (the average '
+           'of log returns: big losses count extra, like they do for your real balance). Blue grows your money, red loses '
+           'it. The outlined cell is the best range.</p>')
+    near = [z for z in (a.get("levels") or {}).get("zones", [])
+            if not rg.is_full(rng) and -rng[0] / 100 <= z["drop"] < 0 and z["strength"] in ("strong", "medium")]
+    if near:
+        ui('<p class="hl-small">Support inside this range: ' + ", ".join(
+            f"{pct(z['drop'])} ({z['strength']})" for z in near) + ' — bounces there keep your position earning.</p>')
+    test = range_test_note(rec)
+    if test:
+        ui(f'<p class="hl-small">{test}</p>')
+    ui('<p class="hl-small">Why ranges below the price win: most sample coins drifted down after busy moments, and an LP '
+       'range is "short volatility" — a drop through it leaves you holding the coin, while a pump above it only caps your '
+       'gain. A range that sits mostly below the price earns fees while buying the dip slowly. If you expect a pump, the '
+       'two-sided row keeps more upside. Past behaviour of 24 coins, not a guarantee.</p>')
+    conclude(*range_conclusion(a, rec))
+
+
+def fee_pct(rate):
+    return f"{rate * 100:.2f}".rstrip("0").rstrip(".") + "%"
+
+
+def range_test_note(rec):
+    test = rec.get("test")
+    if not test:
+        return None
+    t = min(test, key=lambda x: abs(math.log(x["r"] / max(rec["r"], 1e-4))) + abs(math.log(x["share"] / max(rec["share"], 1e-4))) * 0.5)
+    o, fu, fx = t["optimal"], t["full"], t["-40/+50"]
+    return (f"Tested on coins it had not seen (fee level {t['r'] * 100:g}%/day, position {t['share'] * 100:g}% of the pool): "
+            f"choosing the range this way — and skipping when nothing comes out ahead — grew money "
+            f"{o['growth'] * 100:+.2f}% per night vs {fu['growth'] * 100:+.2f}% for full range and {fx['growth'] * 100:+.2f}% for "
+            f"−40%/+50%; losses over 20% happened {o['big_loss'] * 100:.1f}% of the time vs {fu['big_loss'] * 100:.1f}% and "
+            f"{fx['big_loss'] * 100:.1f}%. Better than full range on {t['beats_full']} of {t['coins']} coins.")
+
+
+def range_conclusion(a, rec):
+    best, mine, hours = rec["best"], rec["mine"], f"{a['sleep_h']:g}h"
+    if rec["skip"]:
+        txt = (f"<b>Skip this one</b> at today's fee level ({rec['fee']['r'] * 100:.2f}%/day): even the least-bad range "
+               f"({h(best['label'])}) averaged {pct1(best['mean'])} in {hours} in similar moments.")
+        if mine and mine["range"] != best["range"]:
+            txt += f" Your plan averaged {pct1(mine['mean'])}, with a 1-in-10 bad case of {pct1(mine['p10'])}."
+        return txt, "warn"
+    txt = (f"Open <b>{h(best['label'])}</b>: about {pct1(best['mean'])} on average over {hours} (fees {pct1(best['fees'])}), "
+           f"and in the worst 1 of 10 similar moments {pct1(best['p10'])}.")
+    if mine and mine["range"] != best["range"]:
+        better = mine["growth"] < best["growth"]
+        txt += (f" Your plan averaged {pct1(mine['mean'])} with a bad case of {pct1(mine['p10'])}"
+                + (" — the best range is the safer bet." if better else "."))
+    if a["level"] == 2:
+        return txt + " But the verdict is AVOID: the safest choice is still not to open.", "bad"
+    return txt, "good" if best["mean"] > 0 else "warn"
+
+
+def range_section_basic(a):
     """Recommended LP range from the current price (lower and upper bound)."""
     ra, plan, usd, f, qu = a["range_advice"], a.get("range_plan"), a["usd"], a["now"], a["quote"]
     section("Recommended LP range", f"From the current price, for a position you leave alone for {a['sleep_h']:g} hours.")
@@ -627,6 +939,15 @@ def analog_section(a):
     ui(f'<p class="hl-small">Match % per side (100% = identical). The outcome uses {used}; whale similarity is shown for '
        'context only, because in testing on the sample coins it made the matches slightly less predictive. At most one '
        'moment per coin per 12 hours, so one event is not counted many times.</p>')
+    ex = q["examples"][0] if q["examples"] else None
+    calm = q["p30"] < 0.15
+    txt = (f"{'Calm' if calm else 'Risky' if q['p30'] >= 0.35 else 'Mixed'} history for setups like this: "
+           f"{q['p30'] * 100:.0f}% of the closest moments dumped ≥30% within 8h and the typical 8h low was {pct(q['median_dd'])}.")
+    if ex:
+        txt += f" Closest match: {h(ex['symbol'])} on {when(ex['t'])} ({ex['sim'] * 100:.0f}% similar), which then went {pct(ex['dd'])} at worst."
+    if q["sim"] < 0.5:
+        txt += " Matches are loose (average similarity under 50%), so this angle counts less."
+    conclude(txt, kind)
 
 
 def comparison(a):
@@ -663,6 +984,15 @@ def comparison(a):
         return header, rows
 
     table(*build(cmp["crashes"][:4]), sum_last=True)
+    if b["sim"] >= 0.8:
+        conclude(f"This coin looks like <b>{h(b['symbol'])} right before its {pct(b['drop'])} crash</b> — treat it as a strong "
+                 "warning, even if other angles look calm.", "bad")
+    elif b["sim"] >= 0.5:
+        conclude(f"Partly similar to {h(b['symbol'])} before its {pct(b['drop'])} crash ({b['match']} of {b['total']} signs). "
+                 "Not a crash setup yet, but watch for the missing signs.", "warn")
+    else:
+        conclude(f"No resemblance to the pre-crash setups of the reference coins (best match {b['match']} of {b['total']} "
+                 "signs).", "good")
     ui('<p class="hl-small">Each reference column = conditions at the price top right before that crash (the 4 most '
        'similar shown). ✓ = the sign was present. Last row: how many of that crash\'s signs this coin shows now.</p>')
     if len(cmp["crashes"]) > 4:
@@ -756,6 +1086,15 @@ def tech_section(a):
     ui('<p class="hl-small">"Useful signal" = across the sample coins it ranked dump moments above calm ones '
        '(median AUC ≥0.58 or ≤0.42) in the same direction for at least 70% of coins. Classic indicators like RSI, EMA '
        'and VWAP mostly did not; holder profit, activity, volume spikes and volatility did.</p>')
+    trend = rows[0][1] if rows and rows[0][0].startswith("Trend") else None
+    parts = []
+    if a["factors"]:
+        parts.append("pushing risk up: " + "; ".join(h(x) for x in a["factors"]))
+    if a["calm_factors"]:
+        parts.append("keeping it down: " + "; ".join(h(x) for x in a["calm_factors"]))
+    txt = ("; ".join(parts) + ". " if parts else "") + (f"Chart trend (1h): {trend.lower()}. " if trend else "")
+    txt += "Treat RSI, EMA and VWAP as context, not as a reason to open or skip."
+    conclude(txt[0].upper() + txt[1:], "warn" if a["factors"] else "info")
 
 
 def sleep_section(a):
@@ -775,6 +1114,14 @@ def sleep_section(a):
                           f"50%, about {pct(d50[1] - 1)} (in {pair_unit(a)})."))
     items += [("info", line) for line in a["info"]]
     bullets(items)
+    rec = a.get("best_range")
+    plan = "full-range LP" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}% LP"
+    txt = f"A 30% drop while you sleep costs your {plan} about {pct(d30[1] - 1)} and a 50% drop about {pct(d50[1] - 1)}"
+    if rec and not rg.is_full(rec["best"]["range"]):
+        b30, b50 = (float(rg.lp_values(np.array([x]), rec["best"]["range"])[0]) - 1 for x in (0.7, 0.5))
+        txt += f"; with the best range ({h(rec['best']['label'])}) about {pct(b30)} and {pct(b50)}"
+    conclude(txt + ". Size the position so that loss is acceptable, and keep the alarm on.",
+             "bad" if d30[1] - 1 <= -0.25 else "warn")
     with st.expander("LP value simulation table"):
         table(["Price move", f"LP {rng}", "LP full range", f"Holding {pair_unit(a)}"],
               [[f"{d * 100:.0f}%", (pct(v - 1), "neg"), (pct(full - 1), "neg"), "0%"] for d, v, full in a["sims"]])
@@ -797,6 +1144,7 @@ def render(a):
            ("From ATH", pct(off), sign_class(off), f"ATH {money(f['ath'] * a['supply'], usd, qu)}"),
            ("Last 4 hours", pct(f["r4h"]), sign_class(f["r4h"]), None), liq])
     ui(f'<div class="hl-meta">{h(a["name"])} ({h(a["symbol"])}) · {h(a["address"])} · data up to {when(f["t"])} UTC</div>')
+    summary_section(a)
     usdg_section(a)
     risk_section(a)
     reasons_section(a)
@@ -808,10 +1156,22 @@ def render(a):
 
     section("Last 72 hours")
     ch, df = chart(a)
-    st.altair_chart(ch, theme=None, width="stretch")
+    st.altair_chart(ch, theme=None)
     ui('<div class="hl-legend">' + "".join(f'<span style="--c:{c}">{v}</span>' for v, c in STATUS.items())
        + '</div><p class="hl-small">Top: market cap. Middle: whales selling (+) or buying (−) over 6h, % of supply. '
        'Bottom: the verdict the tool would have given every 5 minutes.</p>')
+    rows72 = a["rows"]
+    if rows72:
+        chg = rows72[-1]["px"] / rows72[0]["px"] - 1
+        hi72 = max(r["px"] for r in rows72)
+        bad_share = sum(r["level"] == 2 for r in rows72) / len(rows72)
+        wn = rows72[-1]["wn6"]
+        off = 1 - rows72[-1]["px"] / hi72
+        txt = (f"Over the last {(rows72[-1]['t'] - rows72[0]['t']) / 3600:.0f}h price moved {pct(chg)} and "
+               + (f"now sits {off * 100:.0f}% below the period high." if off >= 0.005 else "is at the period high.")
+               + f" The tool would have said AVOID "
+               f"{bad_share * 100:.0f}% of the time. Whales {'sold' if wn > 0 else 'bought'} {abs(wn):.2f}% of supply (net) in the last 6h.")
+        conclude(txt, "bad" if wn >= 1.5 else "warn" if bad_share >= 0.3 else "info")
     with st.expander("Chart data (table, last 24h)"):
         rows = [[when(r["t"]), money(r["px"] * a["supply"], usd, qu), (f"{r['wn6']:+.2f}%", sign_class(-r["wn6"])),
                  VERDICTS[r["level"]]] for r in a["rows"][::-1][:288]]
@@ -858,7 +1218,11 @@ def main():
         c1, c2 = st.columns(2)
         rng = c1.slider("Your planned LP range (±%)", 0, 100, 20, step=5, help="0 = full range")
         sleep_h = c2.slider("Hours you'll be away", 2, 12, 8)
-        conservative = st.toggle("Conservative mode", help="Use the stricter of the rules and the model. In testing on "
+        c3, c4 = st.columns(2)
+        position = c3.number_input("Position size (USD)", min_value=10, max_value=10_000_000, value=1000, step=100,
+                                   help="Used to estimate your share of the pool's fees: a big position in a thin pool "
+                                        "earns less per dollar, because your own liquidity dilutes the fees.")
+        conservative = c4.toggle("Conservative mode", help="Use the stricter of the rules and the model. In testing on "
                                  "busy coins it let fewer dumps slip through as OK (3.5% vs 8.4%), but says OK far less often.")
         at = st.text_input("Rewind to a past time (optional, UTC)", placeholder="2026-10-10 15:40",
                            help="Judge the coin as if you checked it at that moment — useful to test the verdict before an old dump.")
@@ -916,7 +1280,7 @@ def main():
     try:
         with st.spinner("Comparing with the sample coins…"):
             a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72,
-                       mode="conservative" if conservative else "balanced")
+                       mode="conservative" if conservative else "balanced", position_usd=float(position))
         if not a:
             ui('<div class="hl-alert warn">This coin has no Uniswap pool or no buys yet, so it cannot be judged.</div>')
             return

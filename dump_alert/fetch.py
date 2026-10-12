@@ -51,6 +51,7 @@ MARKET_VERSION = 2       # versi format market; data versi lama dicari ulang poo
 USDG_GRACE = 3600        # pool USDG baru dipakai 1 jam sesudah dibuat (harga awal sering belum di-arbitrase)
 USDG_RECHECK = 6 * 3600  # koin tanpa pool USDG dicek ulang (pool USDG sering dibuat belakangan)
 BOOK_MAX_DROP = 0.95     # peta likuiditas LP dibaca dari harga sekarang sampai -95%
+BOOK_MAX_RISE = 2.0      # ... dan ke atas sampai +200% (likuiditas yang menahan pembelian)
 BOOK_REFRESH = 900       # detik: peta likuiditas dibaca ulang paling sering tiap 15 menit
 BOOK_POOLS = 8           # pool terbanyak yang dibaca peta likuiditasnya (USDG + ETH paling ramai)
 LP_CHECK_H = 24          # transaksi besar dalam 24 jam terakhir dicek: swap atau tambah/tarik likuiditas?
@@ -736,13 +737,14 @@ class Fetcher:
         return sqrt_to_price(sq, eth_c1, 18, 6)
 
     def liquidity_book(self, force=False):
-        """Peta likuiditas LP di bawah harga sekarang untuk pool-pool utama token: likuiditas aktif,
-        harga, dan tiap tick yang terinisialisasi beserta liquidityNet-nya, dari harga sekarang sampai
-        -95%. levels.py menghitung dari sini berapa tekanan jual yang dibutuhkan untuk menurunkan harga
+        """Peta likuiditas LP di sekitar harga sekarang untuk pool-pool utama token: likuiditas aktif,
+        harga, dan tiap tick yang terinisialisasi beserta liquidityNet-nya, dari +200% sampai -95% harga
+        sekarang. levels.py menghitung dari sini berapa tekanan jual yang dibutuhkan untuk menurunkan harga
         ke tiap level (support likuiditas). Biasanya < 2 ribu CU; dibaca ulang paling sering tiap 15 menit."""
         m = self.ds.get("market") or {}
-        if m.get("kind") != "v4" or (not force and m.get("book")
-                                     and self.latest_ts - m["book"]["ts"] < BOOK_REFRESH):
+        fresh = m.get("book") and self.latest_ts - m["book"]["ts"] < BOOK_REFRESH \
+            and all("up" in p for p in m["book"]["pools"])  # peta lama tanpa sisi atas dibaca ulang
+        if m.get("kind") != "v4" or (not force and fresh):
             return
         pm, tok = m["manager"], self.token
         eth = (ZERO, word_addr(words(self.call(V3_NPM, "WETH9()"))[0]))
@@ -765,6 +767,7 @@ class Fetcher:
         res = self.rpc.batch([c for p in pools for c in (("eth_getStorageAt", [pm, hex(st[p["pool_id"]]), "latest"]),
                                                          ("eth_getStorageAt", [pm, hex(st[p["pool_id"]] + 3), "latest"]))])
         span = math.ceil(math.log(1 / (1 - BOOK_MAX_DROP)) / math.log(1.0001))
+        span_up = math.ceil(math.log(1 + BOOK_MAX_RISE) / math.log(1.0001))
         out, wcalls = [], []
         for n, p in enumerate(pools):
             r0, r3 = res[2 * n], res[2 * n + 1]
@@ -776,12 +779,13 @@ class Fetcher:
             q = quote_of(p)
             c1 = p["currency1"] == tok
             ts = p["tick_spacing"]
-            lo, hi = (tick, tick + span) if c1 else (tick - span, tick)  # arah harga token turun
+            # dari +BOOK_MAX_RISE sampai -BOOK_MAX_DROP harga token (token c1: harga token turun = tick naik)
+            lo, hi = (tick - span_up, tick + span) if c1 else (tick - span, tick + span_up)
             words_ = list(range((lo // ts) >> 8, ((hi // ts) >> 8) + 1))
             rec = {"pool_id": p["pool_id"], "fee": p["fee"], "tick_spacing": ts, "hooks": p["hooks"],
                    "quote": "USDG" if q == USDG else "ETH", "quote_decimals": 6 if q == USDG else 18,
                    "usd_per_quote": 1.0 if q == USDG else eth_usd, "token_is_c1": c1, "sqrt": sq, "tick": tick,
-                   "liquidity": int(r3, 16) & (2 ** 128 - 1), "window": [lo, hi], "ticks": [], "_words": words_}
+                   "liquidity": int(r3, 16) & (2 ** 128 - 1), "window": [lo, hi], "up": BOOK_MAX_RISE, "ticks": [], "_words": words_}
             out.append(rec)
             wcalls += [("eth_getStorageAt", [pm, hex(int.from_bytes(keccak_bytes(bytes.fromhex(enc_int(w))
                         + (st[p["pool_id"]] + 5).to_bytes(32, "big")), "big")), "latest"]) for w in words_]

@@ -33,15 +33,19 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
 
 ### Yang ditampilkan (urut dari atas)
 
-1. **Verdict** (OK / CAUTION / AVOID) dan sarannya.
+1. **Verdict** (OK / CAUTION / AVOID) dan sarannya, lalu **ringkasan**: peluang dump, range terbaik,
+   support pertama, dan risiko whale dalam satu kotak.
 2. Market cap, jarak dari ATH, 4 jam terakhir, likuiditas pool USDG, dan pool USDG yang dipakai.
 3. **Dump risk estimate**: tiga sudut pandang — peluang dari model, hasil situasi mirip, dan seberapa
    sering dump benar-benar terjadi setelah vonis yang sama saat diuji.
 4. **Why this verdict?** dengan faktor utama dari model dalam kalimat biasa.
-5. **Liquidity & support**: tekanan jual yang dibutuhkan untuk menurunkan harga 10/30/50%, grafik
-   kedalaman likuiditas, zona support, lubang likuiditas, dampak jual wallet terbesar.
-6. **Recommended LP range**: batas bawah & atas dari harga sekarang (harga dan market cap), peluang harga
-   tetap di dalam range selama jam tidur, resistance di atas, dan cek range pilihanmu.
+5. **Liquidity & support**: tekanan jual (dan beli) yang dibutuhkan untuk menggerakkan harga, **profil
+   likuiditas vertikal** ala VPVR (likuiditas LP per pita 2% di bawah & di atas harga, di samping volume
+   yang ditransaksikan di tiap harga 7 hari terakhir, plus zona support dan range terbaik), tabel zona
+   support, lubang likuiditas, dampak jual wallet terbesar.
+6. **Best LP range from the current price**: range hasil riset (bagian 4), tingkat fee pool sekarang,
+   batas bawah & atas (harga dan market cap), hasil rata-rata / kasus buruk / peluang rugi >20%, tabel
+   pembanding (range terbaik, range dua sisi terbaik, full range, range rencanamu), dan peta range.
 7. **Similar past moments**: momen paling mirip di 24 koin sampel dan apa yang terjadi 8 jam sesudahnya.
 8. **Compared with crashes in the reference coins**: tanda-tanda di puncak tepat sebelum crash.
 9. **Technical view**: tren EMA, RSI, VWAP, Bollinger, volume, tekanan beli, holder yang sudah profit
@@ -49,6 +53,11 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
    *useful signal* atau *context only* sesuai hasil uji.
 10. Grafik 72 jam, simulasi nilai LP kalau ditinggal tidur, perintah alarm, dan rincian filter.
 
+Tiap analisa ditutup dengan **Conclusion** (kesimpulan satu-dua kalimat dari datanya, warnanya mengikuti
+tingkat risikonya).
+
+**Position size (USD)** (di form): dipakai untuk menghitung porsi fee-mu; posisi besar di pool tipis
+mendapat fee lebih kecil per dolar karena likuiditasmu sendiri ikut membagi fee.
 **Conservative mode** (toggle di form): vonis = yang paling berat dari aturan & model.
 **Rewind to a past time** (opsional): nilai koin seolah kamu mengecek pada jam itu.
 
@@ -150,8 +159,9 @@ peringatan; pool USDG dicari ulang tiap 6 jam.
 
 ### Support & likuiditas
 
-- **Likuiditas LP sungguhan**: peta tick Uniswap v4 sampai 8 pool USDG & ETH (dari harga sekarang sampai
-  −95%) → berapa USD yang harus dijual untuk menurunkan harga ke tiap level. Tembok likuiditas = pita
+- **Likuiditas LP sungguhan**: peta tick Uniswap v4 sampai 8 pool USDG & ETH (dari +200% sampai −95% harga
+  sekarang) → berapa USD yang harus dijual untuk menurunkan harga ke tiap level, dan dibeli untuk
+  menaikkannya. Ditampilkan sebagai profil vertikal per pita 2%, di samping volume 7 hari per harga. Tembok likuiditas = pita
   ≥2x lebih tebal dari sekitarnya; lubang likuiditas = rentang ≥10% yang hampir kosong.
 - **Price action**: swing low 7 hari yang memantul ≥10%, plus harga dengan volume tinggi.
 - Skor kekuatan (dikalibrasi di 24 koin): jumlah pantulan 7 hari 3+ = strong, 1–2 = medium, tanpa
@@ -169,18 +179,51 @@ peringatan; pool USDG dicari ulang tiap 6 jam.
 Di koin yang rawan dump, support lebih sering jebol daripada bertahan. Pakai untuk memilih batas bawah
 range, bukan sebagai jaminan.
 
-### Rekomendasi range
+### Range paling optimal (riset)
 
-- **Batas bawah**: penurunan terdalam selama jam tidur yang tidak terlampaui di 80% kasus serupa (riwayat
-  koin sendiri dan koin sampel dengan vonis yang sama; diambil yang lebih dalam), atau tepat di bawah
-  zona support terdekat kalau zona itu dekat batas tersebut. Batas bawah 90% ditampilkan sebagai opsi
-  lebih aman.
-- **Batas atas**: kenaikan tertinggi selama jam tidur yang tidak terlampaui di 80% kasus serupa,
-  dibulatkan ke 5% (minimal +10%). Di atas batas atas posisi jadi 100% USDG: tidak rugi, hanya berhenti
-  dapat fee.
-- **Stayed inside this range**: berapa persen jendela jam tidur serupa di riwayat koin itu yang harganya
-  tidak pernah keluar dari range.
+Pertanyaannya: dari harga sekarang, range LP mana yang hasilnya paling baik kalau ditinggal tidur?
+Dijawab dengan simulasi di riwayat 24 koin sampel (`dump_alert/ranges.py`):
 
+- Tiap jam di riwayat koin sampel (14.554 momen; koin yang volumenya < 0,2% market cap per hari tidak
+  dipakai), dibuka posisi LP dengan **133 range**: batas bawah −5..−90% × batas atas +2..+200%, plus full
+  range, lalu ditinggal 2–12 jam (sesuai input).
+- **Nilai posisi** di akhir dihitung dengan rumus Uniswap v3/v4 (hanya tergantung harga akhir).
+- **Fee** hanya saat harga di dalam range, sebanding dengan volume nyata per 15 menit sesudahnya
+  (dibanding rata-rata 24 jam sebelumnya, dibatasi 20x), dikali konsentrasi likuiditas range itu, dikali
+  **tingkat fee pool hari ini** (fee pool × volume 24 jam ÷ likuiditas aktif semua pool, diukur live), dan
+  dikurangi efek posisimu sendiri yang ikut membagi fee (input Position size).
+- Range terbaik = yang paling menumbuhkan modal kalau diulang tiap malam di situasi serupa (rata-rata
+  log(1 + hasil), tiap koin sama berat), dikelompokkan per vonis × volatilitas 6 jam. Kriteria ini
+  menghukum kerugian besar lebih berat daripada rata-rata biasa. Kalau range terbaik pun negatif, saran
+  yang muncul adalah **tidak membuka LP**.
+
+Uji leave-one-coin-out (range untuk koin X dipilih hanya dari 23 koin lain), 8 jam. Pertumbuhan per malam / peluang rugi >20%:
+
+| Tingkat fee (full range) · posisi vs pool | Range optimal (+ skip) | Full range | −40% / +50% | Optimal > full range |
+|---|---|---|---|---|
+| 1%/hari · 0,5% | **+0,57%** / 0,6% | −0,88% / 3,8% | −3,69% / 5,6% | 19 dari 24 koin |
+| 1%/hari · 2% | **−0,03%** / 0,1% | −0,88% / 3,8% | −3,76% / 5,6% | 18 dari 24 |
+| 2%/hari · 0,5% | **+2,02%** / 0,8% | −0,63% / 3,7% | −2,64% / 4,9% | 20 dari 24 |
+| 2%/hari · 2% | **+0,52%** / 0,6% | −0,64% / 3,7% | −2,77% / 5,0% | 18 dari 24 |
+| 4%/hari · 0,5% | **+5,85%** / 2,9% | −0,13% / 3,6% | −0,60% / 4,3% | 21 dari 24 |
+| 4%/hari · 2% | **+3,24%** / 1,3% | −0,14% / 3,6% | −0,86% / 4,4% | 22 dari 24 |
+| 4%/hari · 10% | **+0,73%** / 0,4% | −0,21% / 3,6% | −1,86% / 4,7% | 18 dari 24 |
+
+Temuan utama:
+
+- **Range simetris yang lebar-sedang (±20%, −40/+50) rugi rata-rata** di koin sampel kecuali fee-nya
+  sangat tinggi: LP itu "short volatility". Kalau harga jatuh menembus range, kamu memegang koin penuh;
+  kalau harga pump, untungnya terpotong.
+- **Range yang sebagian besar di bawah harga menang** (batas atas +2..+5%): posisinya kebanyakan USDG,
+  mendapat fee sambil membeli koin pelan-pelan saat turun. Ini mencerminkan koin sampel yang rata-rata
+  turun sesudah momen ramai; kalau kamu yakin akan pump, baris "best two-sided range" menyimpan lebih
+  banyak upside.
+- Range sempit (−5..−25%) hanya terbayar saat tingkat fee tinggi (≥4%/hari), vonis OK, dan volatilitas
+  rendah.
+- Di fee ≤1%/hari, hampir tidak ada range yang untung, jadi saran yang paling sering muncul adalah skip.
+  Contoh PRIORS (fee 1%, ±0,5%/hari): skip.
+
+## 5. Command line, alarm & koin sampel
 ## 5. Command line, alarm & koin sampel
 
 ```bash
@@ -200,6 +243,7 @@ python -m dump_alert.fetch --full --token 0xCA          # resolusi harga penuh, 
 # tambahkan 0xCA ke dump_alert/reference_tokens.txt, lalu:
 python -m dump_alert.lp_check --build-reference          # reference.json: tanda crash, model, uji (±20 menit)
 python -m dump_alert.analogs --build                     # library situasi mirip (±15 menit)
+python -m dump_alert.ranges --build --eval               # riset range optimal: ranges.npz + uji (±15 menit)
 python -m dump_alert.study dump_alert/data/0x...json ... [--final] [--value all]   # uji fitur & kontribusi koin
 ```
 
@@ -224,3 +268,7 @@ python -m dump_alert.study dump_alert/data/0x...json ... [--final] [--value all]
   mundur waktu memakai likuiditas hari ini).
 - Pool USDG dikenali dari sampel ±165 transaksi; pool yang sangat jarang dipakai swap bisa tidak terdeteksi.
 - Koin yang masih di bonding curve (belum punya pool Uniswap) belum bisa dinilai.
+- Range optimal: tingkat fee pool diukur hari ini dan dianggap tetap selama jam tidur; volume dianggap
+  terbagi ke pool sebanding likuiditasnya; perubahan likuiditas LP lain selama posisi terbuka tidak
+  dihitung; biaya gas dan slippage saat membuka/menutup tidak dihitung. Hasilnya mencerminkan perilaku
+  24 koin sampel yang sebagian besar turun seiring waktu.

@@ -690,7 +690,7 @@ def breakout_note(f, ref, address):
 
 
 FACTOR_TEXT = {
-    "off_ath": lambda x: f"price is close to its ATH ({pct(x)})",
+    "off_ath": lambda x: f"price is near its ATH ({pct(x)} from it)" if x > -0.3 else f"price is {pct(x)} from its ATH",
     "ext24": lambda x: f"price is {x + 1:.1f}x its 24h low",
     "r4h": lambda x: f"price moved {pct(x)} in 4h",
     "vol6": lambda x: f"price is very volatile ({x:.1f}% per 5 minutes)",
@@ -714,13 +714,34 @@ FACTOR_TEXT = {
 }
 
 
-def model_factors(contrib, x, n=3):
-    """Faktor yang paling menaikkan peluang dump, dalam kalimat biasa."""
+CALM_TEXT = {
+    "off_ath": lambda x: f"price is {pct(x)} from its ATH",
+    "ext24": lambda x: f"price is only {x + 1:.1f}x its 24h low",
+    "r4h": lambda x: f"price moved {pct(x)} in 4h",
+    "vol6": lambda x: f"volatility is moderate ({x:.1f}% per 5 minutes)",
+    "log_age": lambda x: f"the coin is {math.expm1(x) / 24:.0f} days old",
+    "buyers2": lambda x: f"trading is calm ({x:.0f} unique buyers in 2h)",
+    "sellers2": lambda x: f"few wallets selling ({x:.0f} in 2h)",
+    "liq_share": lambda x: f"the pools hold {x:.1f}% of supply",
+    "profit3": lambda x: f"only {x:.0f}% of supply sits with holders up ≥3x",
+    "early": lambda x: f"first-hour wallets hold only {x:.0f}% of supply",
+    "top_buy4": lambda x: f"the top buyer made {x * 100:.0f}% of 4h buys",
+    "bb_width": lambda x: f"narrow Bollinger bands ({x * 100:.0f}% of price)",
+    "vol_ratio2": lambda x: f"volume is {x:.1f}× its 24h average",
+    "fresh": lambda x: f"new big wallets bought only {x:.1f}% in 2h",
+    "wn6": lambda x: f"whales net {'sold' if x > 0 else 'bought'} {abs(x):.1f}% of supply in 6h",
+    "rsi1h": lambda x: f"RSI 1h at {x:.0f}",
+}
+
+
+def model_factors(contrib, x, n=3, sign=1):
+    """Faktor yang paling menaikkan (sign=1) atau menurunkan (sign=-1) peluang dump, dalam kalimat biasa."""
     out, seen = [], set()
-    for name, c in sorted(contrib.items(), key=lambda kv: -kv[1]):
-        if c <= 0.15 or len(out) >= n:
+    texts = FACTOR_TEXT if sign > 0 else CALM_TEXT
+    for name, c in sorted(contrib.items(), key=lambda kv: -kv[1] * sign):
+        if c * sign <= 0.15 or len(out) >= n:
             break
-        txt = FACTOR_TEXT.get(name)
+        txt = texts.get(name)
         if txt is None or x.get(name) is None:
             continue
         t = txt(x[name])
@@ -730,7 +751,8 @@ def model_factors(contrib, x, n=3):
     return out
 
 
-def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48, mode="balanced"):
+def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48, mode="balanced",
+           position_usd=1000.0):
     """Penilaian lengkap untuk titik data terakhir (plus riwayat `history_h` jam untuk grafik);
     dipakai CLI dan web app."""
     if not tok._pt:
@@ -743,12 +765,12 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     rate = History(tok, sleep_h).rate(f["t"])
     rule_level, hits, detail = evaluate(f, rate, flags)
     tview, analog = current_view(tok, rows, f)
-    model_p, factors = None, []
+    model_p, factors, calm = None, [], []
     if ref and ref.get("dump_model"):
         from .study import model_prob, row_x
         x = row_x(f, tok._pt, [p[2] for p in tok.prices], tview, tview)
         model_p, contrib = model_prob(ref["dump_model"], x, factors=True)
-        factors = model_factors(contrib, x)
+        factors, calm = model_factors(contrib, x), model_factors(contrib, x, sign=-1)
     level = combine_level(rule_level, model_p, mode)
     q = tok.quote or "quote"
     m = tok.ds.get("market") or {}
@@ -825,6 +847,8 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
             plan.update(floor_why=why, support=hint["alt"]["zone"] if why == "support" else None,
                         resistance=levels.resistances(tok, f["t"], f["px"]))
 
+    best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd)
+
     advice = {2: "Don't open an LP now. Wait for the danger signs to clear, then check again.",
               1: "High risk. If you still go in: small size, wide range, and keep an alarm on.",
               0: "Lower risk, not zero. Keep an alarm on while the position is open."}[level]
@@ -843,13 +867,13 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     return {
         "symbol": tok.symbol, "name": tok.ds.get("name"), "address": tok.address, "quote": q,
         "supply": tok.supply, "usd": usd, "eth_usd": usd_per_eth, "usdg": usdg, "market": m, "now": f, "rows": rows,
-        "level": level, "verdict": VERDICTS[level], "rule_level": rule_level, "mode": mode, "factors": factors,
+        "level": level, "verdict": VERDICTS[level], "rule_level": rule_level, "mode": mode, "factors": factors, "calm_factors": calm,
         "hits": hits, "detail": detail,
         "filters": [{"code": c, "keras": k, "desc": d, "hit": hits[c], "detail": detail[c]} for c, k, d in FILTERS],
         "pattern": f["pattern"], "hist_rate": rate, "calib": calib, "similar": similar, "compare": compare,
         "reasons": main_reasons, "minor_reasons": minor_reasons,
         "breakout": breakout_note(f, ref, tok.address),
-        "range_advice": ra, "range_plan": plan,
+        "range_advice": ra, "range_plan": plan, "best_range": best_range, "position_usd": position_usd,
         "ref_names": [x["symbol"] for x in (ref or {}).get("tokens", []) if x["address"] != tok.address],
         "similarity_test": [x for x in (ref or {}).get("similarity_test", []) if x["address"] != tok.address],
         "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "sleep_h": sleep_h,
@@ -857,6 +881,28 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "levels": lv, "tech": tview, "analogs": analog, "model_p": model_p,
         "feature_test": (ref or {}).get("feature_test"), "model": (ref or {}).get("dump_model"),
     }
+
+
+_RANGES = []
+
+
+def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd):
+    """Range paling optimal dari riset ranges.py untuk situasi sekarang (None kalau datanya tidak ada).
+    Dikelompokkan dengan vonis 'balanced' (yang dipakai di riset), apa pun mode tampilannya."""
+    from . import ranges
+    if not _RANGES:
+        _RANGES.append(ranges.Ranges.load())
+    rs = _RANGES[0]
+    if rs is None:
+        return None
+    fy = ranges.fee_yield(tok, m, f["t"], usd, position_usd)
+    me = next((i for i, x in enumerate(rs.tokens) if x["address"] == tok.address), None)
+    user = (float(range_pct), float(range_pct)) if range_pct > 0 else ranges.FULL
+    rec = rs.recommend(combine_level(rule_level, model_p, "balanced"), f.get("vol6"), sleep_h, fy["r"], fy["share"],
+                       exclude=me, user=user)
+    if rec:
+        rec["fee"] = fy
+    return rec
 
 
 def verdict_now(tok, ref, sleep_h=8.0, mode="balanced"):
@@ -918,7 +964,7 @@ def support_levels(tok, f, m, ref, max_zones=5):
     zones = levels.supports(tok, f["t"], f["px"], depth)
     keep = sorted(sorted(zones, key=lambda z: (-z["score"], -z["price"]))[:max_zones], key=lambda z: -z["price"])
     return {"zones": keep, "depth": depth, "holes": levels.holes(depth),
-            "whale": levels.whale_impact(tok, f["t"], depth),
+            "whale": levels.whale_impact(tok, f["t"], depth), "volume": levels.volume_bands(tok, f["t"], f["px"]),
             "test": (ref or {}).get("support_test"), "n_pools": len(depth["pools"]) if depth else 0}
 
 
@@ -978,6 +1024,13 @@ def report_text(a) -> str:
               f"  -{ra['p90_round']}%  → 90% chance price stays above it"]
         if ra["breach"] is not None and a["range_pct"] > 0:
             L.append(f"  Your ±{a['range_pct']:g}% range: ~{ra['breach'] * 100:.0f}% chance of breaking the lower bound")
+    br = a.get("best_range")
+    if br:
+        b = br["best"]
+        L += ["", f"Best range from the current price (fee level {br['fee']['r'] * 100:.2f}%/day, {br['n']:,} similar moments): "
+                  + ("SKIP — no range came out ahead; least bad " if br["skip"] else "")
+                  + f"{b['label']}: average {b['mean'] * 100:+.1f}%, 1-in-10 bad case {b['p10'] * 100:+.1f}%, "
+                  f"fees {b['fees'] * 100:+.1f}% over {a['sleep_h']:g}h"]
     lv = a.get("levels") or {}
     dep, k = lv.get("depth"), a["usd"]
     if lv.get("zones") or dep:

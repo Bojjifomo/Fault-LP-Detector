@@ -12,10 +12,13 @@ What it looks at:
   technicals and coin profile, and you see what happened in the next 8 hours.
 - **Whales & holders**: whale net selling/buying (LP adds/removals are filtered out), new big wallets, supply held
   by holders in big profit, sniper/insider bags.
-- **Liquidity & support**: the real Uniswap v4 tick map below the price (selling needed to push price down
-  10/30/50%), liquidity walls and gaps, plus swing-low supports tested on the sample coins.
-- **Recommended LP range**: lower bound from historical drops / just below a support, upper bound from historical
-  rallies, and the chance price stays inside while you sleep.
+- **Liquidity & support**: the real Uniswap v4 tick map from +200% to −95% of the price, shown as a vertical
+  liquidity profile (like VPVR) next to the volume traded at each price, plus liquidity walls, gaps and swing-low
+  supports tested on the sample coins.
+- **Best LP range**: researched by opening 133 different ranges at every past hour of the sample coins and
+  scoring price impact plus fees (real volume × this pool's live fee level, diluted by your position size). It
+  recommends the range that grew money most in similar moments — or tells you to skip when none came out ahead.
+- **A conclusion under every analysis**, and a summary box under the verdict.
 
 ## Run it
 

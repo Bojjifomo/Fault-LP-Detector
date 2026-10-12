@@ -172,8 +172,54 @@ def levels_case():
     assert hint["above"] and hint["alt"]["floor"] == 34, hint
 
 
+def ranges_case():
+    """Range optimal: rumus nilai/konsentrasi, pilihan range di data sintetis, tingkat fee live, kedalaman sisi atas."""
+    import json as js
+    import math as m_
+    import numpy as np
+    from . import ranges as rg
+    assert abs(float(rg.lp_values(np.array([0.5]), (20, 20))[0]) - lp_value(-0.5, 20)) < 1e-9
+    assert abs(float(rg.lp_values(np.array([1.3]), (35, 70))[0]) - lp_value(0.3, 35, 70)) < 1e-9
+    assert abs(float(rg.lp_values(np.array([0.25]), rg.FULL)[0]) - 0.5) < 1e-12
+    assert rg.concentration(rg.FULL) == 1 and abs(rg.concentration((20, 20)) - 10.379) < 0.001
+    assert rg.usdg_share(rg.FULL) == 0.5 and rg.usdg_share((90, 2)) > 0.95 and rg.usdg_share((5, 200)) < 0.2
+    # 3 koin x 60 momen: harga datar & volume rata -> fee saja; range tersempit menang. Tanpa fee & ada yang
+    # turun 50% -> tidak ada range yang untung -> skip.
+    n, steps = 180, rg.STEPS
+    flat = {"tokens": js.dumps([{"symbol": f"C{i}", "address": f"0x{i}", "n": 60} for i in range(3)]),
+            "tok": np.repeat(np.arange(3), 60).astype(np.int16), "t": np.arange(n, dtype=np.int64),
+            "level": np.zeros(n, np.int8), "vol6": np.ones(n, np.float32), "vol_q": np.array([0.5, 2.0]),
+            "P": np.ones((n, steps), np.float16), "W": np.ones((n, steps), np.float16)}
+    rec = rg.Ranges(flat).recommend(0, 1.0, 8, 0.02, 0.0, user=(20.0, 20.0))
+    assert rec["best"]["range"] == (5, 2) and not rec["skip"] and rec["mine"]["range"] == (20.0, 20.0), rec["best"]
+    assert abs(rec["full"]["fees"] - 0.02 / 3) < 1e-3, rec["full"]["fees"]   # 8 jam = 1/3 hari, full range
+    diluted = rg.Ranges(flat).recommend(0, 1.0, 8, 0.02, 1.0)
+    assert diluted["best"]["fees"] < rec["best"]["fees"] / 5, "posisi besar ikut membagi fee"
+    drop = dict(flat, P=np.where(np.arange(n)[:, None] % 2 == 0, 1.0, 0.5).astype(np.float16).repeat(steps, 1))
+    assert rg.Ranges(drop).recommend(0, 1.0, 8, 0.0, 0.0)["skip"]
+
+    class Tk:
+        quote, _pt, prices, events = "USDG", [T0, T0 + H], [[T0, 0, 1.0], [T0 + H, 0, 1.0]], []
+    m = {"fee": 10000, "pool_id": "0xp", "usdg_pools": [{"pool_id": "0xp", "usdg_side": 5000.0}]}
+    fy = rg.fee_yield(Tk, m, T0 + H, 1.0, 1000)
+    assert fy["r"] == 0 and fy["tvl"] == 10000 and abs(fy["share"] - 0.1) < 1e-12, fy
+    Tk.events = [(T0 + 60, "buy", "0xw", 20000.0)]
+    assert abs(rg.fee_yield(Tk, m, T0 + H, 1.0, 1000)["r"] - 0.02) < 1e-12   # 1% x $20K / $10K
+    fy = rg.fee_yield(Tk, {**m, "fee": 0x800000}, T0 + H, 1.0, 1000)
+    assert fy["assumed"] and abs(fy["r"] - 0.02) < 1e-12, fy
+    # kedalaman sisi atas, full range: menaikkan harga 50% butuh L*(sqrt(1.5)-1) USDG, dua orientasi sama
+    L = 10 ** 18
+    p0 = {"sqrt": int(1e-6 * Q96), "tick": m_.floor(m_.log(1e-12) / m_.log(1.0001)), "liquidity": L, "ticks": [],
+          "token_is_c1": False, "quote_decimals": 6, "usd_per_quote": 1.0, "up": 2.0}
+    p1 = {**p0, "sqrt": int(1e6 * Q96), "tick": m_.floor(m_.log(1e12) / m_.log(1.0001)), "token_is_c1": True}
+    u0, u1 = levels.depth_curve_up(p0, 18), levels.depth_curve_up(p1, 18)
+    assert abs(u0[50] / 224744.9 - 1) < 1e-4 and abs(u1[50] / u0[50] - 1) < 1e-3, (u0[50], u1[50])
+    assert levels.depth_curve_up({k: v for k, v in p0.items() if k != "up"}, 18) is None
+
+
 def main():
     levels_case()
+    ranges_case()
     # banyak key: key kuota habis dilewati, key yang kena batas per detik dipelankan lalu dipakai lagi
     assert parse_keys("k1, k2\nk3", ["k2", "https://robinhood-mainnet.g.alchemy.com/v2/k4"], None) == ["k1", "k2", "k3", "k4"]
     rpc = PacedRPC(["https://selftest.invalid/v2/SECRETKEYA", "https://selftest.invalid/v2/SECRETKEYB"])

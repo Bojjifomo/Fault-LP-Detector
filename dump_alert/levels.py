@@ -14,6 +14,7 @@ import math
 from .signals import INFLOW
 
 GRID = 95            # kurva kedalaman per 1% penurunan, 0..-95%
+UP_GRID = 200        # sisi atas: per 1% kenaikan, 0..+200%
 ZONE = 0.04          # lebar zona support ±4% (skala log)
 SWING_SCALES = (2, 8)  # jam: swing low = harga terendah dalam ±2 jam / ±8 jam
 MIN_BOUNCE = 0.10    # pantulan minimal 10% dalam 6 jam supaya dihitung support
@@ -61,6 +62,41 @@ def depth_curve(pool, dec_token):
     return usd, tok, bad
 
 
+def depth_curve_up(pool, dec_token, grid=UP_GRID):
+    """Sisi atas: usd[u] = USD yang harus dibayar pembeli ke pool untuk menaikkan harga token u% (u = 0..grid),
+    dari likuiditas LP di atas harga sekarang (posisi yang memegang token). None kalau peta tidak mencakup sisi atas."""
+    if "up" not in pool:
+        return None
+    grid = min(grid, int(pool["up"] * 100))
+    s0 = pool["sqrt"] / 2 ** 96
+    L, c1 = pool["liquidity"], pool["token_is_c1"]
+    nets = dict((t, n) for t, n in pool["ticks"])
+    qdec, k = pool["quote_decimals"], pool["usd_per_quote"] or 0.0
+    cur = pool["tick"]
+    # harga token naik: token c1 -> sqrtP turun (tick turun); token c0 -> sqrtP naik (tick naik)
+    if c1:
+        crossings = sorted(((t, 1.0001 ** (t / 2)) for t in nets if t <= cur), reverse=True)
+        level = lambda u: s0 / math.sqrt(1 + u)
+    else:
+        crossings = sorted((t, 1.0001 ** (t / 2)) for t in nets if t > cur)
+        level = lambda u: s0 * math.sqrt(1 + u)
+    events = [(level(u / 100), "grid", u) for u in range(1, grid + 1)] + [(sp, "tick", t) for t, sp in crossings]
+    events.sort(key=lambda e: e[0], reverse=c1)
+    usd = [0.0] * (grid + 1)
+    cu, s = 0.0, s0
+    for sp, kind, x in events:
+        q_in = L * (1 / sp - 1 / s) if c1 else L * (sp - s)
+        cu += q_in / 10 ** qdec * k
+        s = sp
+        if kind == "grid":
+            usd[x] = cu
+            if x == grid:
+                break
+        else:
+            L = max(0, L - nets[x] if c1 else L + nets[x])
+    return usd
+
+
 def book_depth(book, dec_token):
     """Gabungan kurva kedalaman semua pool di peta likuiditas."""
     if not book or not book.get("pools"):
@@ -78,8 +114,13 @@ def book_depth(book, dec_token):
         pools.append({"pool_id": p["pool_id"], "quote": p["quote"], "fee": p["fee"], "usd": u,
                       "usd30": u[30], "usd50": u[50]})
     band = [0.0] + [total_u[d] - total_u[d - 1] for d in range(1, GRID + 1)]
+    ups = [depth_curve_up(p, dec_token) for p in book["pools"] if p.get("usd_per_quote")]
+    up = None
+    if ups and all(u is not None for u in ups):
+        n = min(len(u) for u in ups)
+        up = [sum(u[i] for u in ups) for i in range(n)]
     return {"usd": total_u, "tok": total_t, "band": band, "pools": pools, "inconsistent": bad,
-            "ts": book["ts"]}
+            "ts": book["ts"], "up_usd": up, "up_band": [0.0] + [up[i] - up[i - 1] for i in range(1, len(up))] if up else None}
 
 
 def drop_for_tokens(depth, amount):
@@ -161,6 +202,20 @@ def volume_profile(events, pt, pv, t_now):
         b = round(math.log(p) / math.log(1.01))
         vol[b] = vol.get(b, 0.0) + v * p
     return vol
+
+
+def volume_bands(tok, now_t, px_now, band=2, up=200, down=80):
+    """Volume transaksi LOOKBACK_D hari terakhir per pita `band`% relatif ke harga sekarang (dalam aset quote):
+    {batas bawah pita dalam persen: volume}. Untuk profil volume (VPVR) di samping peta likuiditas."""
+    pt, pv = tok._pt, [p[2] for p in tok.prices]
+    k = bisect.bisect_right(pt, now_t)
+    out = {}
+    for b, v in volume_profile(tok.events, pt[:k], pv[:k], now_t).items():
+        d = (1.01 ** b / px_now - 1) * 100
+        if -down <= d < up:
+            key = int(math.floor(d / band) * band)
+            out[key] = out.get(key, 0.0) + v
+    return out
 
 
 def supports(tok, now_t, px_now, depth=None, max_drop=0.8):
