@@ -14,9 +14,29 @@ import html
 import os
 import sys
 import time
+import traceback
 
 # streamlit runs this file directly; add the repo root so dump_alert & lp_analysis can be imported
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+
+def _drop_stale_modules():
+    """Streamlit Cloud pulls new commits into the running app and re-runs this file, but keeps the dump_alert
+    modules it already imported, so new app code ends up calling old functions (TypeError: unexpected keyword
+    argument). When a file changed after they were loaded, drop them so the imports below load them fresh."""
+    pkg = sys.modules.get("dump_alert")
+    if pkg is None:
+        return
+    dirs = [os.path.join(ROOT, d) for d in ("dump_alert", "lp_analysis")]
+    files = [os.path.join(d, f) for d in dirs if os.path.isdir(d) for f in os.listdir(d)]
+    if max((os.path.getmtime(f) for f in files if os.path.isfile(f)), default=0) > getattr(pkg, "_loaded_at", 0):
+        for name in [m for m in sys.modules if m.split(".")[0] in ("dump_alert", "lp_analysis")]:
+            del sys.modules[name]
+
+
+_drop_stale_modules()
+_import_t = time.time()
 
 import altair as alt  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -30,6 +50,8 @@ from dump_alert.lp_check import (ANALOG_GROUPS, SIGNS, STEP, VERDICTS, assess, l
 from dump_alert.patterns import STATES  # noqa: E402
 from dump_alert.signals import Token  # noqa: E402
 from dump_alert.study import useful  # noqa: E402
+
+sys.modules["dump_alert"].__dict__.setdefault("_loaded_at", _import_t)
 
 # Hyperliquid-like palette. Status colors pass the validator (CVD, contrast >= 3:1) on panel #0F1A1F;
 # the *_TEXT versions are lighter for text on dark backgrounds.
@@ -891,13 +913,21 @@ def main():
         ds = truncate(ds, as_of)
         ui(f'<div class="hl-note">Rewind mode: judged as if now were {when(as_of)} UTC (liquidity and pool data are '
            'today\'s).</div>')
-    with st.spinner("Comparing with the sample coins…"):
-        a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72,
-                   mode="conservative" if conservative else "balanced")
-    if not a:
-        ui('<div class="hl-alert warn">This coin has no Uniswap pool or no buys yet, so it cannot be judged.</div>')
-        return
-    render(a)
+    try:
+        with st.spinner("Comparing with the sample coins…"):
+            a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72,
+                       mode="conservative" if conservative else "balanced")
+        if not a:
+            ui('<div class="hl-alert warn">This coin has no Uniswap pool or no buys yet, so it cannot be judged.</div>')
+            return
+        render(a)
+    except Exception as e:  # Streamlit Cloud hides the message of uncaught errors; show it here (keys redacted)
+        traceback.print_exc()
+        ui(f'<div class="hl-alert bad">Something went wrong while analysing this coin: {h(type(e).__name__)}: '
+           f'{h(rpc._redact(e)[:300])}<br>The pulled data is saved. Press <b>Check now</b> again; if it keeps '
+           'happening, send a screenshot of the error details below.</div>')
+        with st.expander("Error details"):
+            st.code(rpc._redact(traceback.format_exc())[-4000:], language=None)
 
 
 main()
