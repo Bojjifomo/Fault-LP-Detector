@@ -1,0 +1,7 @@
+# Token yang dipakai sebagai pembanding "kondisi sebelum crash".
+# Tambah satu contract address per baris, lalu jalankan:
+#   python -m dump_alert.fetch --full --token 0xCA
+#   python -m dump_alert.lp_check --build-reference
+0x285a9ddf53bef60ebcc55f5752724a30ef7b2d17  # CRADLE
+0xbc2283d12b1f2f46c1613ae672e95c55b69ca414  # PULP
+0xcd0b3b43d8632ce600a13e4519754c138998a93c  # JOLLY
