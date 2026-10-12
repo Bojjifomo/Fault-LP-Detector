@@ -47,6 +47,7 @@ GROUP_LABEL = {"pattern": "Pattern", "price": "Price action", "whale": "Whales",
 NAMES = [n for g in GROUPS.values() for n in g]
 K = 30            # jumlah momen mirip yang dipakai
 SPREAD = 12 * H   # momen dari koin yang sama minimal berjarak 12 jam (supaya tidak satu kejadian dihitung berkali-kali)
+MISSING = 1.5     # jarak untuk sisi yang datanya kosong (kemiripan 25%)
 
 
 def moment(tok, rows_by_t, row_ts, t, pt, pv, ff, tf):
@@ -152,8 +153,9 @@ class Library:
         z = self.zvec(v)
         gd = self.group_dist(z, mask)
         use = groups or list(GROUPS)
-        D = np.nanmean(np.vstack([gd[g] for g in use]), axis=0)
-        D = np.where(np.isnan(D), np.inf, D)
+        # sisi yang datanya kosong (mis. koin baru launch, belum ada riwayat 24 jam) dihitung tidak mirip,
+        # supaya momen dengan data tidak lengkap tidak terlihat sangat mirip
+        D = np.mean(np.vstack([np.where(np.isnan(gd[g]), MISSING, gd[g]) for g in use]), axis=0)
         idx_all = np.nonzero(mask)[0]
         order = np.argsort(D)
         picked, taken = [], {}

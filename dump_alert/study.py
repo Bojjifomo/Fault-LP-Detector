@@ -228,16 +228,42 @@ def train_model(data, names=MODEL_FEATURES, lam=1.0, label="y30"):
     return {"names": list(names), "label": label, "med": m.med.tolist(), "mu": m.mu.tolist(), "sd": m.sd.tolist(),
             "beta": m.beta.tolist(), "loto_auc": per,
             "calibration": [{"lo": CAL_BINS[i], "hi": CAL_BINS[i + 1], "n": n, "rate": (k / n) if n else None}
-                            for i, (n, k) in enumerate(cal)]}
+                            for i, (n, k) in enumerate(cal)]}, preds
 
 
-def model_prob(model, x):
+def model_prob(model, x, factors=False):
+    """Peluang dump dari model; factors=True juga mengembalikan kontribusi tiap fitur (z x koefisien)."""
     if not model:
-        return None
+        return (None, {}) if factors else None
     v = np.array([x.get(n) if x.get(n) is not None else np.nan for n in model["names"]], float)
     v = np.where(np.isnan(v), np.array(model["med"]), v)
     z = (v - np.array(model["mu"])) / np.array(model["sd"])
-    return float(1 / (1 + np.exp(-np.clip(model["beta"][0] + z @ np.array(model["beta"][1:]), -30, 30))))
+    contrib = z * np.array(model["beta"][1:])
+    p = float(1 / (1 + np.exp(-np.clip(model["beta"][0] + contrib.sum(), -30, 30))))
+    return (p, dict(zip(model["names"], contrib.tolist()))) if factors else p
+
+
+def adjust_level(level, p, t_caution, t_avoid):
+    """Vonis aturan dinaikkan oleh model: OK -> CAUTION kalau p >= t_caution, CAUTION -> AVOID kalau
+    p >= t_avoid. Model tidak pernah menurunkan vonis (filter keras tetap berlaku)."""
+    if p is None:
+        return level
+    if level == 0 and p >= t_caution:
+        return 2 if p >= t_avoid else 1
+    if level == 1 and p >= t_avoid:
+        return 2
+    return level
+
+
+def verdict_rates(data, preds, t_caution, t_avoid, label="y30"):
+    """Peluang dump per vonis: aturan saja vs aturan + model (prediksi leave-one-token-out)."""
+    out = {"rules": [[0, 0] for _ in range(3)], "combined": [[0, 0] for _ in range(3)]}
+    for sym, rs in data.items():
+        for p_, r in zip(preds[sym], rs):
+            for key, lv in (("rules", r["level"]), ("combined", adjust_level(r["level"], p_, t_caution, t_avoid))):
+                out[key][lv][0] += 1
+                out[key][lv][1] += r[label]
+    return out
 
 
 def coin_value(data, names, label="y30", lam=1.0):

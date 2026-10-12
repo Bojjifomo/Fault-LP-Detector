@@ -16,7 +16,7 @@ import time
 import requests
 
 from .fetch import Fetcher, data_path, log, make_rpc
-from .lp_check import FILTERS, STEP, VERDICTS, History, evaluate, features
+from .lp_check import FILTERS, STEP, VERDICTS, load_reference, verdict_now
 from .signals import Token, launch_risk
 
 
@@ -37,27 +37,32 @@ def check(rpc, address: str, sleep_h: float, state: dict):
     tok = Token(Fetcher(rpc, address, path).run(STEP, liquidity=False))
     flags = launch_risk(tok).get("flags", [])
     if new and flags:
-        notify(f"[RISIKO LAUNCH] {tok.symbol} {tok.address}\n" + "\n".join(f"• {f}" for f in flags))
-    rows = features(tok, start=tok._pt[-1] - 2 * STEP) if tok._pt else []
-    if not rows:
-        log(f"{tok.symbol}: belum ada data harga")
+        notify(f"[LAUNCH RISK] {tok.symbol} {tok.address}\n" + "\n".join(f"• {f}" for f in flags))
+    res = verdict_now(tok, REF, sleep_h, MODE)
+    if not res:
+        log(f"{tok.symbol}: no price data yet")
         return
-    f = rows[-1]
-    level, hits, detail = evaluate(f, History(tok, sleep_h).rate(f["t"]), flags)
+    level, _, p, hits, detail, f = res
     keras = [c for c, k, _ in FILTERS if k and hits[c]]
     prev = state.get(address, {"level": 0, "keras": []})
     if level > prev["level"] or (level == 2 and not set(keras) <= set(prev["keras"])):
         fdv = f["px"] * tok.supply
         lines = [f"[{VERDICTS[level]}] {tok.symbol} {tok.address}",
                  time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(f["t"])) + f" · FDV {fdv:,.1f} {tok.quote}"]
+        if p is not None:
+            lines.append(f"• model: {p * 100:.0f}% chance of a ≥30% drop within {sleep_h:g}h")
         lines += [f"• {code} {desc}: {detail[code]}" for code, k, desc in FILTERS if hits[code] and code != "L5"]
         if level == 2:
-            lines.append("→ pertimbangkan tarik LP sekarang")
+            lines.append("→ consider pulling your LP now")
         notify("\n".join(lines))
     elif level < prev["level"] and level == 0:
-        notify(f"[REDA] {tok.symbol}: vonis kembali LAYAK")
-    log(f"{tok.symbol}: {VERDICTS[level]} {','.join(c for c, _, _ in FILTERS if hits[c]) or '-'}")
+        notify(f"[CALM] {tok.symbol}: verdict back to OK")
+    log(f"{tok.symbol}: {VERDICTS[level]}" + (f" (model {p * 100:.0f}%)" if p is not None else "")
+        + f" {','.join(c for c, _, _ in FILTERS if hits[c]) or '-'}")
     state[address] = {"level": level, "keras": keras}
+
+
+REF, MODE = None, "balanced"
 
 
 def main():
@@ -66,8 +71,11 @@ def main():
     ap.add_argument("--interval", type=int, default=300, help="detik antar cek (default 300)")
     ap.add_argument("--sleep", type=float, default=8, help="jendela risiko untuk statistik riwayat, jam (default 8)")
     ap.add_argument("--once", action="store_true", help="cek sekali lalu keluar")
+    ap.add_argument("--conservative", action="store_true", help="vonis = yang paling berat dari aturan & model")
     ap.add_argument("--rpc-url")
     args = ap.parse_args()
+    global REF, MODE
+    REF, MODE = load_reference(), "conservative" if args.conservative else "balanced"
     rpc = make_rpc(args.rpc_url)
     state_path = os.path.join(os.path.dirname(data_path("x")), "watch_state.json")
     state = json.load(open(state_path)) if os.path.exists(state_path) else {}

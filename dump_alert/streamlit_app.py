@@ -432,17 +432,24 @@ def risk_section(a):
         bin_ = next((b for b in m.get("calibration", []) if b["lo"] <= p < b["hi"]), None)
         note = (f"when it said {b_lo(bin_)}–{b_hi(bin_)}% in testing, dumps happened {bin_['rate'] * 100:.0f}% of the time"
                 if bin_ and bin_["rate"] is not None and bin_["n"] >= 30 else "calibration not available")
-        items.append(("Model", f"{p * 100:.0f}%", "neg" if p >= 0.35 else "warn-t" if p >= 0.2 else "pos", note))
+        items.append(("Model", f"{p * 100:.0f}%", "neg" if p >= 0.35 else "warn-t" if p >= 0.15 else "pos", note))
     if q is not None:
         items.append(("Similar past moments", f"{q['n30']} of {q['n']}", "neg" if q["p30"] >= 0.35 else
-                      "warn-t" if q["p30"] >= 0.2 else "pos", f"dumped ≥30% within 8h ({q['p30'] * 100:.0f}% weighted)"))
-    if cal is not None:
+                      "warn-t" if q["p30"] >= 0.15 else "pos", f"dumped ≥30% within 8h ({q['p30'] * 100:.0f}% weighted)"))
+    vt = ((a["model"] or {}).get("verdict_test") or {}).get(a["mode"])
+    if vt and vt[a["level"]]["p30"] is not None:
+        r = vt[a["level"]]["p30"]
+        items.append((f"When the tool said {a['verdict']}", f"{r * 100:.0f}%", "neg" if r >= 0.35 else "warn-t" if r >= 0.15
+                      else "pos", f"a ≥30% drop followed within {a['sleep_h']:g}h (tested on the sample coins)"))
+    elif cal is not None:
         items.append((f"Past {a['verdict']} verdicts", f"{cal['p30'] * 100:.0f}%", "neg" if cal["p30"] >= 0.35 else
                       "warn-t" if cal["p30"] >= 0.2 else "pos", f"dumped ≥30% within {cal['sleep_h']:g}h ({cal['n_tokens']} coins)"))
     tiles(items, "two" if len(items) == 2 else "")
     ui('<p class="hl-small"><b>Model</b> = a statistical model trained on the sample coins (price action, whales, holder '
-       'profit, activity, coin age). <b>Similar past moments</b> = the closest matching hours in the sample coins and '
-       'what happened next. <b>Past verdicts</b> = how often a dump followed when the rules gave the same verdict.</p>')
+       'profit, activity, coin age, liquidity). It drives the verdict: under 15% → OK, 15–35% → CAUTION, 35%+ → AVOID, and '
+       'a hard danger sign from the rules always means at least CAUTION. <b>Similar past moments</b> = the closest matching '
+       'hours in the sample coins and what happened next. The last tile shows how often a dump really followed this '
+       'verdict when the tool was tested on coins it had not seen.</p>')
 
 
 def b_lo(b):
@@ -503,16 +510,17 @@ def liquidity_section(a):
         for z in lv["zones"]:
             age = f"{z['age_h']:.0f}h ago (+{z['bounce'] * 100:.0f}%)" if z["age_h"] is not None else "—"
             rows.append([money(z["price"] * a["supply"], usd, qu), (pct(z["drop"]), "neg"),
-                         (z["strength"], {"strong": "yes", "medium": "", "weak": "no"}[z["strength"]]), age,
+                         (z["strength"], {"strong": "yes", "medium": "", "weak": "no"}[z["strength"]]), str(z["touches"]), age,
                          f"${compact(z['liq_usd'])}" if z["liq_usd"] is not None else "—",
                          f"${compact(z['sell_usd'])}" if z["sell_usd"] is not None else "—"])
-        table(["Support (mcap)", "Distance", "Strength", "Last bounce", "Liquidity in zone", "Selling needed to get there"], rows)
+        table(["Support (mcap)", "Distance", "Strength", "Bounces (7d)", "Last bounce", "Liquidity in zone",
+               "Selling needed to get there"], rows)
     t = lv.get("test") or {}
     if t.get("strong") and t.get("plain"):
         r = lambda k: f"{t[k]['rate'] * 100:.0f}%" if t.get(k) and t[k]["rate"] is not None else "—"
         ui(f'<p class="hl-small">Support = a ±{ZONE * 100:.0f}% zone around a 7-day swing low that bounced ≥10%, a thick '
-           'liquidity band, or a high-volume price. Strength = how recent (&lt;24h) and how big (≥40%) the last bounce '
-           f'was, plus thick LP liquidity. Tested on the sample coins, when price touched a zone within 24h: strong zones '
+           'liquidity band, or a high-volume price. Strength = how many times price bounced there in the last 7 days '
+           f'(3+ = strong), plus thick LP liquidity. Tested on the sample coins, when price touched a zone within 24h: strong zones '
            f'held {r("strong")} of the time, medium {r("medium")}, weak {r("weak")}, and ordinary levels {r("plain")}. '
            'Supports help you place the lower bound; they are not a guarantee, and dump-prone coins break them often.</p>')
 
@@ -577,7 +585,7 @@ def analog_section(a):
         return
     section("Similar past moments", "Every hour of history in the sample coins was compared with right now on pattern, "
                                     "price action, whales, technicals and coin profile. Here is what happened next.")
-    kind = "bad" if q["p30"] >= 0.35 else "warn" if q["p30"] >= 0.2 else "good"
+    kind = "bad" if q["p30"] >= 0.35 else "warn" if q["p30"] >= 0.15 else "good"
     ui(f'<div class="hl-alert {kind}"><b>{q["n30"]} of the {q["n"]} closest moments</b> (from {q["tokens"]} coins) dropped '
        f'≥30% within 8 hours ({q["p30"] * 100:.0f}% weighted by similarity). Typical low over the next 8h: '
        f'{pct(q["median_dd"])}' + (f', typical high: {pct(q["median_rise"])}' if q["median_rise"] is not None else "")
@@ -594,9 +602,9 @@ def analog_section(a):
                        (pct(e["rise"]), "pos") if e["rise"] is not None else "—"])
     table(["Coin", "When (UTC)", "Match", "Pattern", "Price", "Whales", "Tech", "Next 8h low", "Next 8h high"], rows)
     used = ", ".join(GROUP_LABEL[g].lower() for g in ANALOG_GROUPS)
-    ui(f'<p class="hl-small">Match % per side (100% = identical). The outcome uses {used}; technicals are shown for context '
-       'only, because in testing they made the matches less predictive. At most one moment per coin per 12 hours, so one '
-       'event is not counted many times.</p>')
+    ui(f'<p class="hl-small">Match % per side (100% = identical). The outcome uses {used}; whale similarity is shown for '
+       'context only, because in testing on the sample coins it made the matches slightly less predictive. At most one '
+       'moment per coin per 12 hours, so one event is not counted many times.</p>')
 
 
 def comparison(a):
@@ -800,8 +808,11 @@ def render(a):
             mark = ("❌" if x["keras"] else "⚠️") if x["hit"] else "✅"
             rows.append([f"{mark} {x['code']}", (x["desc"], "lbl"), x["detail"]])
         table(["", "Filter", "Current value"], rows)
-        ui('<p class="hl-small">K = hard filter (one is enough for AVOID). L = soft filter (two or more → CAUTION; '
-           'L7 new 4h ATH → at least CAUTION).</p>')
+        rule = VERDICTS[a["rule_level"]]
+        mp = f'{a["model_p"] * 100:.0f}%' if a["model_p"] is not None else "n/a"
+        ui(f'<p class="hl-small">Rules alone would say <b>{rule}</b>; model estimate {mp}; mode '
+           f'{"conservative" if a["mode"] == "conservative" else "balanced"}. K = hard filter (any K → at least CAUTION, '
+           'AVOID in conservative mode). L = soft filter (two or more → CAUTION in the rules).</p>')
         pat = a["pattern"]
         if pat:
             ui(f'<p class="hl-small">Price pattern: {h(STATES[pat["state"]])}. High {h(money(pat["h1"] * a["supply"], usd, qu))} '
@@ -825,16 +836,18 @@ def main():
         c1, c2 = st.columns(2)
         rng = c1.slider("Your planned LP range (±%)", 0, 100, 20, step=5, help="0 = full range")
         sleep_h = c2.slider("Hours you'll be away", 2, 12, 8)
+        conservative = st.toggle("Conservative mode", help="Use the stricter of the rules and the model. In testing on "
+                                 "busy coins it let fewer dumps slip through as OK (3.5% vs 8.4%), but says OK far less often.")
         at = st.text_input("Rewind to a past time (optional, UTC)", placeholder="2026-10-10 15:40",
                            help="Judge the coin as if you checked it at that moment — useful to test the verdict before an old dump.")
         go = st.form_submit_button("Check now", type="primary", width="stretch")
     with st.expander("How to read this"):
         ui('<ul class="hl-list">'
-           '<li class="bad"><b>AVOID</b>: a major danger sign is active, e.g. whales are selling, price just crashed, price '
-           'came back near its ATH after a dip (the pattern before CRADLE &amp; PULP crashed), or the token just launched.</li>'
-           '<li class="warn"><b>CAUTION</b>: two or more minor warnings, a new ATH on the 4h chart, or conditions very similar '
-           'to a reference coin right before its crash.</li>'
-           '<li class="good"><b>OK</b> does not mean safe: coins can crash without warning. Keep an alarm on.</li>'
+           '<li class="bad"><b>AVOID</b>: the model sees a 35%+ chance of a ≥30% drop while you sleep. In testing, a dump '
+           'followed about half of these.</li>'
+           '<li class="warn"><b>CAUTION</b>: a 15–35% chance, or a hard danger sign is on (whales selling, price just '
+           'crashed, back near the ATH after a dip, or the token just launched).</li>'
+           '<li class="good"><b>OK</b>: under 15%. Not a guarantee — coins can crash without warning. Keep an alarm on.</li>'
            '<li class="info">The first check of a coin takes a few minutes to pull its on-chain data; later checks are fast. '
            'Coins without a Uniswap pool (still on a bonding curve) cannot be judged yet.</li></ul>')
     if not go:
@@ -879,7 +892,8 @@ def main():
         ui(f'<div class="hl-note">Rewind mode: judged as if now were {when(as_of)} UTC (liquidity and pool data are '
            'today\'s).</div>')
     with st.spinner("Comparing with the sample coins…"):
-        a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72)
+        a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72,
+                   mode="conservative" if conservative else "balanced")
     if not a:
         ui('<div class="hl-alert warn">This coin has no Uniswap pool or no buys yet, so it cannot be judged.</div>')
         return

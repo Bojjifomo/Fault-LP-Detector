@@ -383,10 +383,6 @@ def build_reference(paths, sleep_h=8.0):
             continue
         scanned.append((tok, rows))
         ref["tokens"].append({"symbol": tok.symbol, "address": tok.address, "from": rows[0]["t"], "to": rows[-1]["t"]})
-        for lvl in range(3):
-            d = [f["dd"] for f in rows if f["level"] == lvl and f["dd"] is not None]
-            ref["verdicts"].append({"address": tok.address, "level": lvl, "n": len(d),
-                                    "n30": sum(x <= -0.3 for x in d), "n50": sum(x <= -0.5 for x in d)})
         ref["episodes"] += episodes(tok, rows)
         ref["crashes"] += crashes(tok, rows)
     # uji silang: tiap token dicocokkan hanya ke potret crash token LAIN
@@ -401,44 +397,68 @@ def build_reference(paths, sleep_h=8.0):
                 x[2] += f["dd"] <= -0.5
         ref["similarity_test"].append({"symbol": tok.symbol, "address": tok.address, "buckets": dict(b)})
     ref["support_test"] = levels.support_test([tok for tok, _ in scanned])
-    # uji fitur & model peluang dump (leave-one-token-out) untuk technical view dan estimasi risiko
+    # model peluang dump (leave-one-token-out) + uji fitur; vonis akhir = model + pengaman filter keras
     from . import study
-    data = {}
+    data, toks = {}, {}
     for tok, _ in scanned:
         _, rs = study.rows_for(None, tok=tok)
         if len(rs) >= 20:
             for r in rs:
                 r["tok"] = tok.symbol
-            data[tok.symbol] = rs
+            data[tok.symbol], toks[tok.symbol] = rs, tok
     names = list(study.BASE) + list(study.FLOW_NAMES) + list(study.EXTRA) + list(study.TECH_NAMES)
     ref["feature_test"] = study.feature_test(data, names)
-    ref["dump_model"] = study.train_model(data) if len(data) >= 3 else None
-    # sebaran penurunan terdalam per vonis, untuk saran batas bawah range (tidur 4/8/12 jam)
-    ref["drops"] = []
-    for tok, rows in scanned:
-        for w in DROP_WINDOWS:
-            dd = forward_dd(tok, w)
-            hist = {lvl: [0] * 101 for lvl in range(3)}
-            for f in rows:
-                d = dd[bisect.bisect_right(tok._pt, f["t"]) - 1]
-                if d is not None:
-                    hist[f["level"]][drop_bin(d)] += 1
-            ref["drops"].append({"address": tok.address, "sleep_h": w, "hist": hist})
-    # sebaran kenaikan tertinggi per vonis, untuk batas atas range
-    ref["rises"] = []
-    for tok, rows in scanned:
-        for w in DROP_WINDOWS:
-            ru = forward_rise(tok, w)
-            hist = {lvl: [0] * RISE_BINS for lvl in range(3)}
-            for f in rows:
-                r = ru[bisect.bisect_right(tok._pt, f["t"]) - 1]
-                if r is not None:
-                    hist[f["level"]][rise_bin(r)] += 1
-            ref["rises"].append({"address": tok.address, "sleep_h": w, "hist": hist})
+    model, preds = study.train_model(data) if len(data) >= 3 else (None, {})
+    ref["dump_model"] = model
+    # statistik per vonis akhir (titik tiap 30 menit, prediksi model tanpa koin itu sendiri)
+    ref["verdicts"], ref["drops"], ref["rises"] = [], [], []
+    vt = {mode: [[0, 0, 0] for _ in range(3)] for mode in MODES}
+    for sym, rs in data.items():
+        tok = toks[sym]
+        lv = {mode: [combine_level(r["level"], p_, mode) for r, p_ in zip(rs, preds.get(sym, [None] * len(rs)))]
+              for mode in MODES}
+        for mode in MODES:
+            for r, x in zip(rs, lv[mode]):
+                vt[mode][x][0] += 1
+                vt[mode][x][1] += r["dd"] <= -0.3
+                vt[mode][x][2] += r["dd"] <= -0.5
+        for x in range(3):
+            d = [r["dd"] for r, l_ in zip(rs, lv["balanced"]) if l_ == x]
+            ref["verdicts"].append({"address": tok.address, "level": x, "n": len(d),
+                                    "n30": sum(v <= -0.3 for v in d), "n50": sum(v <= -0.5 for v in d)})
+        k = [bisect.bisect_right(tok._pt, r["t"]) - 1 for r in rs]
+        for w in DROP_WINDOWS:  # sebaran turun & naik terdalam per vonis, untuk saran range (tidur 4/8/12 jam)
+            dd, ru = forward_dd(tok, w), forward_rise(tok, w)
+            hd = {x: [0] * 101 for x in range(3)}
+            hr = {x: [0] * RISE_BINS for x in range(3)}
+            for j, l_ in zip(k, lv["balanced"]):
+                if dd[j] is not None:
+                    hd[l_][drop_bin(dd[j])] += 1
+                if ru[j] is not None:
+                    hr[l_][rise_bin(ru[j])] += 1
+            ref["drops"].append({"address": tok.address, "sleep_h": w, "hist": hd})
+            ref["rises"].append({"address": tok.address, "sleep_h": w, "hist": hr})
+    if model:
+        model["thresholds"] = list(MODEL_T)
+        model["verdict_test"] = {mode: [{"n": n, "p30": a / n if n else None, "p50": b / n if n else None}
+                                        for n, a, b in vt[mode]] for mode in MODES}
     return ref
 
 
 DROP_WINDOWS = (4, 8, 12)
+# Vonis akhir: peluang dump dari model (< 15% OK, 15-35% CAUTION, >= 35% AVOID), dengan pengaman: filter keras
+# aturan (whale jual, falling knife, launch, retest ATH) membuat vonis minimal CAUTION ("balanced"), atau
+# vonis = yang paling berat dari aturan & model ("conservative"). Dipilih dari uji leave-one-token-out di 24
+# koin sampel: saat koin ramai, OK lebih sering dan lebih aman, AVOID jauh lebih tegas daripada aturan saja.
+MODEL_T = (0.15, 0.35)
+MODES = ("balanced", "conservative")
+
+
+def combine_level(rule_level, p, mode="balanced"):
+    if p is None:
+        return rule_level
+    m = 0 if p < MODEL_T[0] else 1 if p < MODEL_T[1] else 2
+    return max(m, rule_level) if mode == "conservative" else max(m, 1 if rule_level == 2 else 0)
 
 
 def drop_bin(d):
@@ -531,6 +551,13 @@ def range_plan(tok: Token, level, t, sleep_h, ref, floor):
     else:
         inside = None
     return {"floor": floor, "ceiling": ceiling, "inside": inside, "own": own, "n": len(pairs) if own else sum(peer_r)}
+
+
+def _json_default(o):
+    """Angka numpy (int64/float64/bool_) -> tipe Python biasa saat menulis reference.json."""
+    if hasattr(o, "item"):
+        return o.item()
+    raise TypeError(f"{type(o).__name__} tidak bisa ditulis ke JSON")
 
 
 def load_reference(path=REF_PATH):
@@ -656,13 +683,54 @@ def breakout_note(f, ref, address):
     cs = [c for c in (ref or {}).get("crashes", []) if c["address"] != address]
     n = sum(1 for c in cs if c.get("ath4h_break"))
     s = (f"📈 NEW ATH on the 4h chart: price is {pct(f['px'] / f['ath4h'] - 1)} above the highest previous 4h close. "
-         "Because of that, the ATH-retest pattern alone no longer forces AVOID; the verdict is at least CAUTION.")
+         "Because of that, the ATH-retest pattern alone no longer counts as a hard danger sign.")
     if cs:
         s += f" Careful though: {n} of {len(cs)} reference crashes happened right after a 4h ATH breakout like this."
     return s
 
 
-def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48):
+FACTOR_TEXT = {
+    "off_ath": lambda x: f"price is close to its ATH ({pct(x)})",
+    "ext24": lambda x: f"price is {x + 1:.1f}x its 24h low",
+    "r4h": lambda x: f"price moved {pct(x)} in 4h",
+    "vol6": lambda x: f"price is very volatile ({x:.1f}% per 5 minutes)",
+    "fresh": lambda x: f"new big wallets bought {x:.1f}% of supply in 2h",
+    "wn6": lambda x: f"whales net {'sold' if x > 0 else 'bought'} {abs(x):.1f}% of supply in 6h",
+    "log_age": lambda x: f"the coin is young ({math.expm1(x):.0f}h old)",
+    "buyers2": lambda x: f"very hot trading ({x:.0f} unique buyers in 2h)",
+    "sellers2": lambda x: f"many wallets selling ({x:.0f} unique sellers in 2h)",
+    "profit3": lambda x: f"{x:.0f}% of supply sits with holders up ≥3x",
+    "early": lambda x: f"{x:.0f}% of supply is still with first-hour wallets",
+    "vol_ratio2": lambda x: f"volume is {x:.1f}× its 24h average",
+    "liq_share": lambda x: f"the pools hold only {x:.1f}% of supply (thin vs market cap)",
+    "ath4h_break": lambda x: "new ATH on the 4h chart",
+    "pat_retest": lambda x: "ATH retest pattern",
+    "pat_gagal": lambda x: "failed ATH retest",
+    "top_buy4": lambda x: f"buying is spread over many wallets (top buyer {x * 100:.0f}% of 4h buys)",
+    "bb_width": lambda x: f"wide Bollinger bands ({x * 100:.0f}% of price)",
+    "rsi1h": lambda x: f"RSI 1h at {x:.0f}",
+    "hour_sin": lambda x: "time of day (historically riskier hours)",
+    "hour_cos": lambda x: "time of day (historically riskier hours)",
+}
+
+
+def model_factors(contrib, x, n=3):
+    """Faktor yang paling menaikkan peluang dump, dalam kalimat biasa."""
+    out, seen = [], set()
+    for name, c in sorted(contrib.items(), key=lambda kv: -kv[1]):
+        if c <= 0.15 or len(out) >= n:
+            break
+        txt = FACTOR_TEXT.get(name)
+        if txt is None or x.get(name) is None:
+            continue
+        t = txt(x[name])
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48, mode="balanced"):
     """Penilaian lengkap untuk titik data terakhir (plus riwayat `history_h` jam untuk grafik);
     dipakai CLI dan web app."""
     if not tok._pt:
@@ -673,7 +741,15 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     f = rows[-1]
     flags = launch_risk(tok).get("flags", [])
     rate = History(tok, sleep_h).rate(f["t"])
-    level, hits, detail = evaluate(f, rate, flags)
+    rule_level, hits, detail = evaluate(f, rate, flags)
+    tview, analog = current_view(tok, rows, f)
+    model_p, factors = None, []
+    if ref and ref.get("dump_model"):
+        from .study import model_prob, row_x
+        x = row_x(f, tok._pt, [p[2] for p in tok.prices], tview, tview)
+        model_p, contrib = model_prob(ref["dump_model"], x, factors=True)
+        factors = model_factors(contrib, x)
+    level = combine_level(rule_level, model_p, mode)
     q = tok.quote or "quote"
     m = tok.ds.get("market") or {}
     # pengali harga -> USD: 1 untuk harga dari pool USDG, harga ETH hari ini untuk pool ETH, None kalau tidak tahu
@@ -737,11 +813,6 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     info.append(f"Last 24h activity: {nb:,} buys, {ns:,} sells.")
 
     lv = support_levels(tok, f, m, ref)
-    tview, analog = current_view(tok, rows, f)
-    model_p = None
-    if ref and ref.get("dump_model"):
-        from .study import model_prob, row_x
-        model_p = model_prob(ref["dump_model"], row_x(f, tok._pt, [p[2] for p in tok.prices], tview, tview))
     ra = range_advice(tok, level, f["t"], sleep_h, range_pct, ref)
     plan = None
     if ra.get("p80_round") is not None:
@@ -758,6 +829,13 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
               1: "High risk. If you still go in: small size, wide range, and keep an alarm on.",
               0: "Lower risk, not zero. Keep an alarm on while the position is open."}[level]
     main_reasons, minor_reasons = reasons(hits, f, rate, flags)
+    if model_p is not None:
+        why = (" Main drivers: " + "; ".join(factors) + ".") if factors else ""
+        line = f"The model puts the chance of a ≥30% drop within {sleep_h:g}h at {model_p * 100:.0f}%.{why}"
+        (main_reasons if model_p >= MODEL_T[0] else minor_reasons).insert(0, line)
+        if rule_level == 2 and level < 2 and mode == "balanced":
+            main_reasons.append("A hard safety filter is on, so the verdict is at least CAUTION even though the model's "
+                                "estimate is lower.")
     if bumped:
         b = compare["best"]
         main_reasons.insert(0, f"Conditions look like {b['symbol']} right before its {pct(b['drop'])} crash "
@@ -765,7 +843,8 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     return {
         "symbol": tok.symbol, "name": tok.ds.get("name"), "address": tok.address, "quote": q,
         "supply": tok.supply, "usd": usd, "eth_usd": usd_per_eth, "usdg": usdg, "market": m, "now": f, "rows": rows,
-        "level": level, "verdict": VERDICTS[level], "hits": hits, "detail": detail,
+        "level": level, "verdict": VERDICTS[level], "rule_level": rule_level, "mode": mode, "factors": factors,
+        "hits": hits, "detail": detail,
         "filters": [{"code": c, "keras": k, "desc": d, "hit": hits[c], "detail": detail[c]} for c, k, d in FILTERS],
         "pattern": f["pattern"], "hist_rate": rate, "calib": calib, "similar": similar, "compare": compare,
         "reasons": main_reasons, "minor_reasons": minor_reasons,
@@ -778,6 +857,24 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "levels": lv, "tech": tview, "analogs": analog, "model_p": model_p,
         "feature_test": (ref or {}).get("feature_test"), "model": (ref or {}).get("dump_model"),
     }
+
+
+def verdict_now(tok, ref, sleep_h=8.0, mode="balanced"):
+    """Vonis akhir untuk titik terakhir tanpa analisa lengkap (untuk alarm): (level, rule_level, p, hits, detail, f)."""
+    rows = scan(tok, sleep_h, start=tok._pt[-1] - 26 * H) if tok._pt else []
+    if not rows:
+        return None
+    f = rows[-1]
+    rule_level, hits, detail = evaluate(f, History(tok, sleep_h).rate(f["t"]), launch_risk(tok).get("flags", []))
+    p = None
+    if ref and ref.get("dump_model"):
+        from .flow import flow_features
+        from .study import model_prob, row_x
+        from .technicals import tech_features
+        t = f["t"]
+        view = {**(tech_features(tok, [t]).get(t) or {}), **(flow_features(tok, [t - 6 * H, t]).get(t) or {})}
+        p = model_prob(ref["dump_model"], row_x(f, tok._pt, [x[2] for x in tok.prices], view, view))
+    return combine_level(rule_level, p, mode), rule_level, p, hits, detail, f
 
 
 _LIB = []
@@ -806,9 +903,11 @@ def current_view(tok, rows, f):
     return view, analog
 
 
-# sisi yang dipakai untuk menghitung hasil situasi mirip (yang terbukti membantu di uji leave-one-token-out);
-# semua sisi tetap ditampilkan kemiripannya
-ANALOG_GROUPS = ["pattern", "price", "whale", "context"]
+# sisi yang dipakai untuk menghitung hasil situasi mirip. Uji leave-one-token-out di 24 koin (median AUC):
+# semua sisi 0,832, tanpa whale 0,843, tanpa tech 0,834, tanpa pattern 0,831, tanpa price 0,823, tanpa profil
+# 0,828 -> whale tidak dipakai untuk hasilnya (aliran whale jarang & berisik untuk pencocokan); semua sisi
+# tetap ditampilkan kemiripannya
+ANALOG_GROUPS = ["pattern", "price", "tech", "context"]
 
 
 def support_levels(tok, f, m, ref, max_zones=5):
@@ -922,14 +1021,14 @@ def main():
         ref = load_reference() or {}
         ref["support_test"] = levels.support_test([Token(json.load(open(p))) for p in reference_paths()])
         with open(REF_PATH, "w") as fh:
-            json.dump(ref, fh, separators=(",", ":"))
+            json.dump(ref, fh, separators=(",", ":"), default=_json_default)
         for k, v in ref["support_test"].items():
             print(f"{k:18s} dites {v['n']:5d}  bertahan {v['rate'] * 100 if v['rate'] is not None else 0:5.1f}%")
         return
     if args.build_reference is not None:
         ref = build_reference(args.build_reference or reference_paths(), 8.0)
         with open(REF_PATH, "w") as fh:
-            json.dump(ref, fh, separators=(",", ":"))
+            json.dump(ref, fh, separators=(",", ":"), default=_json_default)
         print(f"{REF_PATH}: {len(ref['tokens'])} token, {len(ref['episodes'])} kejadian, "
               f"{len(ref.get('crashes', []))} potret sebelum crash")
         return

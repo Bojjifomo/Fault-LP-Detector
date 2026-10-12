@@ -216,19 +216,18 @@ def supports(tok, now_t, px_now, depth=None, max_drop=0.8):
             z["liq_usd"] = depth["usd"][d1] - depth["usd"][d0]
             z["sell_usd"] = depth["usd"][min(GRID, int(round(drop * 100)))]
         zones.append(z)
-    # kekuatan, dikalibrasi di riwayat CRADLE/PULP/JOLLY (support_test): yang paling menentukan adalah
-    # seberapa baru zona terakhir memantul (<24 jam bertahan ±35%, 1-3 hari ±23%, lebih lama ±0%) dan
-    # besar pantulannya (>=40%); jumlah pantulan & volume hampir tidak berpengaruh. Likuiditas LP tebal
-    # (>=1,5x pita sekitarnya) ikut menambah, berdasarkan mekanika pool (belum bisa diuji historis).
+    # kekuatan, dikalibrasi di riwayat 24 koin sampel (support_test, zona disentuh dalam 24 jam): yang membedakan
+    # adalah jumlah pantulan 7 hari (3+ bertahan ±42%, 1-2 ±36%, zona tanpa pantulan ±19%; level biasa ±32%).
+    # Seberapa baru & besar pantulan tidak konsisten. Likuiditas LP tebal (>= 2,5x pita sekitarnya) ikut
+    # menaikkan satu tingkat, berdasarkan mekanika pool (likuiditas historis tidak tersimpan, belum bisa diuji).
     for z in zones:
         age = (now_t - z["last_touch"]) / H if z["last_touch"] else None
-        score = (2 if age is not None and age < 24 else 1 if age is not None and age < 72 else 0)
-        score += 1 if z["bounce"] >= 0.4 else 0
+        tier = 2 if z["touches"] >= 3 else 1 if z["touches"] >= 1 else 0
         if depth:
             z["liq_ratio"] = r = local_ratio(depth, -z["drop"] * 100, ZONE * 100)
-            score += 2 if r >= 2.5 else 1 if r >= 1.5 else 0
-        z["age_h"], z["score"] = age, score
-        z["strength"] = "strong" if score >= 3 else "medium" if score >= 2 else "weak"
+            tier = min(2, tier + (1 if r >= 2.5 else 0))
+        z["age_h"], z["score"] = age, tier
+        z["strength"] = ("weak", "medium", "strong")[tier]
     zones.sort(key=lambda z: -z["price"])
     return zones
 

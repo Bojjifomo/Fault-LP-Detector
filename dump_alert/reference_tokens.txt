@@ -1,7 +1,27 @@
-# Token yang dipakai sebagai pembanding "kondisi sebelum crash".
-# Tambah satu contract address per baris, lalu jalankan:
+# Koin sampel / pembanding (dipilih user). Satu contract address per baris, lalu jalankan:
 #   python -m dump_alert.fetch --full --token 0xCA
-#   python -m dump_alert.lp_check --build-reference
+#   python -m dump_alert.lp_check --build-reference && python -m dump_alert.analogs --build
 0x285a9ddf53bef60ebcc55f5752724a30ef7b2d17  # CRADLE
 0xbc2283d12b1f2f46c1613ae672e95c55b69ca414  # PULP
 0xcd0b3b43d8632ce600a13e4519754c138998a93c  # JOLLY
+0x351ab2c51e223b28d219fe28cc3956410cc11e18  # ANTHROPIG
+0x3d463f5c9091661dc650feec693b1d1b41d4209c  # +++++
+0xcace05716778f86e4feb04bd7a2c2f2c31705f2b  # MOONLET
+0xb827ec080b1bf5002dbf796b0fca9e239409407d  # WORLDIE
+0xeb2ecf641a1f04b8df37c24eabca8f5a47cfaacb  # ERRAND
+0x9cb595fbb3601dc0ef80e87921dc4ffd9307aba3  # musegram
+0x238e40b75ae78a1388a14e517d855893e92e58db  # SGT
+0x4d066ab4d924b7b3d01c6ecbfc142efe33aeb7fa  # JEV
+0x41ca1a94f5262c4a84fafdaa23b9499aa5b9fcd0  # DEBT
+0xddd4947010496b500abe96ab0965c38584413ba3  # Nautilo
+0x4eb990547bce4a982432ca88cf5fae7eed1a2d35  # FLYBRAIN
+0x3d0ef79957d2f7114a7c5fc0ca9f13f19c342764  # VERONA
+0x9fa1c5e90a11294f83a9f135b81ad1b537a5ffdc  # ZEAL
+0x3df3644bcf4ce0d993e18c86c3080e53bfea06f1  # Jacob
+0x20024e485c0b22b42855589700721b28320a7777  # PRISM
+0x218d0dc56476b05f131bd6cc82b80c7b052fa9b1  # BELL
+0xb06b1e58f5ba2a3df1ab74c01cb2a44c5395b3be  # BODKIN
+0xce4c9418b8e9bcad3e4ba2bd84123a49a6911e18  # RSI
+0x507b6f349a80114097a67b8b4677367acc15b220  # par
+0xa3602804e096cb73bd8344afc1ff3f3390b899c5  # PEZ
+0x1c1daef0300551adbfbe403e7d567b6c5aff566f  # HOTDOG
