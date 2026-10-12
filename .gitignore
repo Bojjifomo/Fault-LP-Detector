@@ -1,4 +1,4 @@
 __pycache__/
 *.pyc
-dump_alert/data/
+dump_alert/data
 dump_alert/out/
