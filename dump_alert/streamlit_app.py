@@ -49,7 +49,7 @@ from dump_alert.guide import GUIDE  # noqa: E402
 from dump_alert.fetch import Fetcher, QuotaError, data_path, eth_usd, make_rpc, parse_keys  # noqa: E402
 from dump_alert.levels import ZONE  # noqa: E402
 from dump_alert.lp_check import (SIGNS, STEP, VERDICTS, assess, load_reference,  # noqa: E402
-                                 lp_value, parse_time, pct, truncate)
+                                 lp_value, parse_mcap, parse_time, pct, truncate)
 from dump_alert.patterns import STATES  # noqa: E402
 from dump_alert.signals import Token  # noqa: E402
 from dump_alert.study import useful  # noqa: E402
@@ -738,15 +738,30 @@ def decision_card(a):
                          f"{usd_of(c['p10'] * pos)}.")
     ex = a.get("exits") or {}
     tk = ex.get("take")
-    if is_single(a) and lvl < 2:
+    o = a.get("open_pos")
+    if is_single(a) and lvl < 2 and not o:
         st_ = [z for z in ex.get("stall") or [] if z["strength"] in ("strong", "medium")]
         lines.append("<b>Exit:</b> automatic. You start with only USDG, so there is nothing to sell above today's price. If "
                      "the price dips into your range and comes back up, your LP sells the coin back into USDG by itself"
                      + (f"; a bounce may stall near the floor at {pct(st_[0]['drop'])}." if st_ else "."))
-    elif tk and lvl < 2:
+    elif tk and lvl < 2 and not o:
         lines.append(f"<b>Take profit:</b> around +{tk['up'] * 100:.0f}% (mcap {h(money(tk['price'] * a['supply'], a['usd'], a['quote']))}"
                      f", just under the {tk['zone']['strength']} resistance at +{tk['zone']['up'] * 100:.0f}%). Upper bound at "
                      f"+{tk['upper_bound']}% sells automatically there.")
+    if o:
+        g = o["good"]
+        txt = (f"<b>Your open position</b> (opened at mcap {h(pos_mcap(a, o['entry_px']))}): {STATE_TXT[o['state']].lower()}, "
+               f"worth about {h(dollars(pos * o['value']))} ({vs_deposit(o['value'])}, fees not included).")
+        if o["state"] == "above":
+            txt += " It is 100% USDG: nothing to sell."
+        elif g:
+            txt += (f" Good exit: mcap {h(pos_mcap(a, g['price']))} ({g['from_now'] * 100:+.0f}%"
+                    + (", top of your range" if g["kind"] == "top" else f", under the {g['zone']['strength']} resistance") + ").")
+        if o["stop"] and o["state"] != "above":
+            txt += f" Close it if the price falls below mcap {h(pos_mcap(a, o['stop']['price']))}."
+        lines.insert(0, txt)
+        todo = ("Close your open position now: the chance of a big drop is high. Check again later before opening a new one."
+                if lvl == 2 else "Open position: follow the exit plan below and keep the alarm on. New position: " + todo)
     hs = a.get("holder_summary")
     if hs:
         lines.append(f"<b>Big holders:</b> the 10 biggest wallets hold {hs['share'] * 100:.0f}% of all coins; "
@@ -760,6 +775,218 @@ def decision_card(a):
     ui(f'<div class="hl-card hl-verdict {cls}"><div class="t">{title}</div>'
        '<ul class="hl-dec">' + "".join(f"<li>{x}</li>" for x in lines) + "</ul>"
        f'<div class="s"><b>What to do:</b> {todo}</div></div>')
+
+
+STATE_TXT = {"in": "In your range", "above": "Above your range", "below": "Below your range"}
+
+
+def pos_mcap(a, price):
+    return money(price * a["supply"], a["usd"], a["quote"])
+
+
+def vs_deposit(v):
+    return f"{(v - 1) * 100:+.1f}% vs what you put in"
+
+
+def chance(x):
+    return "—" if x is None else f"{x * 100:.0f}%"
+
+
+def target_name(t):
+    return ("Top of your range (automatic exit)" if t["kind"] == "top" else
+            f"{t['zone']['strength'].capitalize()} resistance")
+
+
+def position_section(a):
+    """Exit plan for a position that is already open: where it stands, what it is worth, and where to get out."""
+    o = a["open_pos"]
+    pos, hours = a["position_usd"], f"{a['sleep_h']:g} hours"
+    rng = f"-{o['lower']:g}% to 0%" if o["upper"] == 0 else f"-{o['lower']:g}% / +{o['upper']:g}%"
+    kind = "single-sided USDG" if o["upper"] == 0 else "two-sided"
+    now_off = a["now"]["px"] / o["entry_px"] - 1
+    section("Your open position: exit plan",
+            f"Opened at mcap {pos_mcap(a, o['entry_px'])} with range {rng} ({kind}), {dollars(pos)} put in. The price is now "
+            f"mcap {pos_mcap(a, a['now']['px'])}, {now_off * 100:+.1f}% from your entry.")
+    if not 0.02 <= a["now"]["px"] / o["entry_px"] <= 50:
+        ui('<div class="hl-alert warn">Your entry market cap is very far from today\'s. Check the number (e.g. 8.38M, not '
+           '8.38K).</div>')
+    good, stop, bottom, st_ = o["good"], o["stop"], o["bottom"], o["state"]
+    tiles([("Where the price is", STATE_TXT[st_], "pos" if st_ == "in" else "warn-t" if st_ == "below" else "",
+            f"range mcap {pos_mcap(a, o['low_px'])} – {pos_mcap(a, o['top_px'])}"),
+           ("Your position now", dollars(pos * o["value"]), sign_class(o["value"] - 1),
+            f"{vs_deposit(o['value'])} · {o['coin'] / o['value'] * 100:.0f}% coin, {o['usdg'] / o['value'] * 100:.0f}% USDG"
+            if o["value"] > 0 else ""),
+           ("Good exit", pos_mcap(a, good["price"]) if good else "—", "pos" if good else "",
+            (f"{good['from_now'] * 100:+.0f}% from now · " + ("top of range, automatic" if good["kind"] == "top" else
+                                                            f"just under the {good['zone']['strength']} resistance"))
+            if good else "already 100% USDG"),
+           ("Exit if it breaks", pos_mcap(a, stop["price"]) if stop else "—", "warn-t" if stop else "",
+            f"{stop['from_now'] * 100:+.0f}% from now · {stop['zone']['strength']} floor" if stop else "no strong floor below")])
+    plan = []   # (class, label, text) — label in bold; texts are built from numbers and fixed words only
+    if st_ == "above":
+        plan.append(("good", "Nothing to exit:", f"your position is 100% USDG now — {dollars(pos * o['value'])}"
+                     + (", your full deposit" if o["upper"] == 0 else f" ({vs_deposit(o['value'])})")
+                     + ", plus the fees it earned."))
+        plan.append(("info", "Options:", f"withdraw and keep the USDG, or leave it: it only buys the coin again if the price "
+                     f"falls back below mcap {pos_mcap(a, o['top_px'])}. While the price stays above, it earns no fees. To earn "
+                     "fees again, close it and open a new range from today's price (see the range section below)."))
+    else:
+        if st_ == "below":
+            plan.append(("warn", "Now:", f"the price is below your range, so your position is all coin — "
+                         f"{dollars(pos * o['value'])} ({vs_deposit(o['value'])}) — and it earns no fees. It moves 1:1 with "
+                         f"the price until it gets back into your range at mcap {pos_mcap(a, o['low_px'])} "
+                         f"({(o['low_px'] / a['now']['px'] - 1) * 100:+.0f}%)."))
+        top = next((t for t in o["targets"] if t["kind"] == "top"), None)
+        auto = (f"at mcap {pos_mcap(a, top['price'])} ({top['from_now'] * 100:+.0f}%) your LP is 100% USDG again by itself: "
+                f"{dollars(pos * top['value'])}" + (", your full deposit back" if o["upper"] == 0 else f" ({vs_deposit(top['value'])})")
+                + f", plus fees. The price got there in {chance(top['reach'])} of nights like this.") if top else ""
+        if good and good["kind"] == "resistance":
+            z = good["zone"]
+            plan.append(("good", "Scenario 1 — the bounce stalls (good exit):",
+                         f"close the LP by hand around mcap {pos_mcap(a, good['price'])} ({good['from_now'] * 100:+.0f}%), "
+                         f"just under the {z['strength']} resistance ({res_why(z, a['usd'])}). Your position would be worth "
+                         f"about {dollars(pos * good['value'])} ({vs_deposit(good['value'])}). Levels like this turned the price "
+                         f"back {chance(good['hold'])} of the time in tests; the price got there in {chance(good['reach'])} of "
+                         "nights like this."))
+            nx = o["after"]
+            txt = "if the price closes 5%+ above that level, it is broken: "
+            if nx and nx["kind"] == "resistance":
+                txt += (f"hold for the next {nx['zone']['strength']} resistance at mcap {pos_mcap(a, nx['price'])} (worth "
+                        f"{dollars(pos * nx['value'])}). All the way up, {auto}")
+            else:
+                txt += "hold for the top of your range — " + auto
+            plan.append(("info", "Scenario 2 — breakout:", txt))
+        elif top:
+            plan.append(("good", "Scenario 1 — the price climbs back (good exit):",
+                         auto + " No strong resistance stands in the way, so let it exit by itself."))
+        if stop:
+            txt = (f"if the price falls below mcap {pos_mcap(a, stop['price'])} ({stop['from_now'] * 100:+.0f}%, the "
+                   f"{stop['zone']['strength']} floor breaks), close the LP — worth about {dollars(pos * stop['value'])} then. "
+                   f"Chance it falls that far in {hours}: {chance(stop['reach'])}.")
+        else:
+            txt = "there is no strong floor below the price to lean on; keep the alarm on."
+        if bottom and st_ == "in":
+            txt += (f" If you don't close, below the bottom of your range (mcap {pos_mcap(a, bottom['price'])}, "
+                    f"{bottom['from_now'] * 100:+.0f}%) you hold only coin, worth {dollars(pos * bottom['value'])} there "
+                    f"(chance in {hours}: {chance(bottom['reach'])}).")
+        plan.append(("warn", f"Scenario {2 if good and good['kind'] == 'top' else 3} — drop:", txt))
+    if a["level"] == 2:
+        plan.insert(0, ("bad", "Verdict AVOID:", f"closing now ({dollars(pos * o['value'])}) is the safe choice."))
+    if o["momentum"]:
+        plan.append(("info", "Momentum is strong:", "medium and weak resistances usually break in this state, so only strong "
+                     "ones count as a good exit."))
+    ui('<ul class="hl-list">' + "".join(f'<li class="{c}"><b>{lab}</b> {t}</li>' for c, lab, t in plan) + "</ul>")
+    if st_ != "above":
+        ch = position_chart(a, o)
+        st.altair_chart(ch, theme=None)
+        ui('<p class="hl-small">The line = what your position is worth at each market cap (fees not included). Up = higher '
+           'price. Purple bands = resistance above the price, green bands = floors below it, the shaded area = your range.</p>')
+    if st_ == "above":
+        conclude(*position_conclusion(a, o))
+        return
+    res = [t for t in o["targets"] if t["kind"] == "resistance"]
+    shown = [t for t in o["targets"] if t["kind"] == "top" or t in res[:5] or t is good]
+    rows = []
+    for t in sorted(shown + [x for x in (o["now"], o["stop"], o["bottom"]) if x], key=lambda t: -t["price"]):
+        name = {"now": "Now", "stop": "Floor — exit if it breaks", "bottom": "Bottom of your range"}.get(t["kind"]) or target_name(t)
+        if t is good:
+            name = "✓ Good exit: " + name
+        rows.append([name, pos_mcap(a, t["price"]), (f"{t['from_now'] * 100:+.0f}%" if t["kind"] != "now" else "—"),
+                     dollars(pos * t["value"]), (f"{(t['value'] - 1) * 100:+.1f}%", sign_class(t["value"] - 1)),
+                     chance(t.get("hold")) if t["kind"] == "resistance" else "—",
+                     chance(t["reach"]) if t["kind"] != "now" else "—"])
+    table(["", "Market cap", "From now", "Your position worth", "vs put in", "Turned price back (tests)", f"Gets there ({hours})"],
+          rows)
+    ui('<p class="hl-small">"Your position worth" leaves out the fees your LP already earned (Uniswap shows them). "Turned price '
+       'back" = how often levels of that strength held when the price reached them, in tests on the 24 sample coins (it '
+       'depends on momentum). "Gets there" = how often the price reached that level during a night like this (this coin\'s '
+       'own history and similar moments in other coins). Resistance now also counts floors the price fell through: in tests, '
+       'a level with 2+ broken floors turned the price back about 45% of the time, versus 28% for a random level.</p>')
+    conclude(*position_conclusion(a, o))
+
+
+def position_conclusion(a, o):
+    pos = a["position_usd"]
+    good, stop = o["good"], o["stop"]
+    if o["state"] == "above":
+        return (f"Your position is 100% USDG ({h(dollars(pos * o['value']))} plus fees): no exit needed. Withdraw, or close it and "
+                "open a new range from today's price if you want fees again."), "good"
+    txt = f"Your position is worth about {h(dollars(pos * o['value']))} now ({vs_deposit(o['value'])}). "
+    if good and good["kind"] == "resistance":
+        txt += (f"Good exit: around <b>mcap {h(pos_mcap(a, good['price']))}</b> ({good['from_now'] * 100:+.0f}%), just under the "
+                f"{good['zone']['strength']} resistance — worth about {h(dollars(pos * good['value']))}. If it breaks through, "
+                "hold for the next level.")
+    elif good:
+        txt += (f"Good exit: the top of your range at <b>mcap {h(pos_mcap(a, good['price']))}</b> "
+                f"({good['from_now'] * 100:+.0f}%), where the LP is 100% USDG again by itself.")
+    if stop:
+        txt += f" Close it if the price falls below mcap {h(pos_mcap(a, stop['price']))} ({stop['from_now'] * 100:+.0f}%)."
+    if a["level"] == 2:
+        return "The verdict is AVOID: closing now is the safe choice. " + txt, "bad"
+    return txt, "good" if o["state"] == "in" and (o["value"] >= 0.95) else "warn"
+
+
+def position_chart(a, o):
+    """Vertical: market cap (up) vs what the position is worth; range shaded, resistance & floor bands, exit lines."""
+    pos, sup, k = a["position_usd"], a["supply"], a["usd"] or 1
+    px, e = a["now"]["px"], o["entry_px"]
+    lo_p = min(o["low_px"] * 0.85, (o["stop"] or o["now"])["price"] * 0.9, px * 0.9)
+    hi_p = max(o["top_px"] * 1.12, px * 1.1)
+    n = 120
+    ps = [lo_p * (hi_p / lo_p) ** (i / n) for i in range(n + 1)]
+    df = pd.DataFrame({"mcap": [p * sup * k for p in ps], "worth": [pos * lp_value(p / e - 1, o["lower"], o["upper"]) for p in ps]})
+    df["from_now"] = [(p / px - 1) * 100 for p in ps]
+    w0, w1 = df["worth"].min(), max(df["worth"].max(), pos)
+    xmin = max(0.0, w0 - (w1 - w0) * 0.08)
+    xmax = w1 + (w1 - xmin) * 0.6   # free space on the right for the labels
+    y = alt.Y("mcap:Q", title="Market cap" + (" (USD)" if a["usd"] else f" ({a['quote']})"),
+              scale=alt.Scale(type="log", domain=[lo_p * sup * k, hi_p * sup * k], nice=False),
+              axis=alt.Axis(format="$~s" if a["usd"] else "~s", grid=False, tickCount=6))
+    x = alt.X("worth:Q", title="Your position worth (USD, fees not included)", axis=alt.Axis(format="$~s", tickCount=5),
+              scale=alt.Scale(domain=[xmin, xmax], nice=False, zero=False))
+    layers = [alt.Chart(pd.DataFrame([{"y0": max(lo_p, o["low_px"]) * sup * k, "y1": min(hi_p, o["top_px"]) * sup * k}])).mark_rect(
+        color=MINT, opacity=0.06).encode(y="y0:Q", y2="y1:Q", x=alt.datum(xmin), x2=alt.datum(xmax))]
+    bands = []
+    for t in o["targets"]:
+        if t["kind"] == "resistance":
+            z = t["zone"]
+            bands.append({"y0": z["price"] * (1 - ZONE) * sup * k, "y1": min(hi_p, z["price"] * (1 + ZONE)) * sup * k, "c": "res"})
+    for z in (a.get("levels") or {}).get("zones", []):
+        if z["price"] * (1 + ZONE) > lo_p and z["strength"] in ("strong", "medium"):
+            bands.append({"y0": max(lo_p, z["price"] * (1 - ZONE)) * sup * k, "y1": z["price"] * (1 + ZONE) * sup * k, "c": "sup"})
+    if bands:
+        bd = pd.DataFrame(bands)
+        layers.append(alt.Chart(bd).mark_rect(opacity=0.14).encode(
+            y="y0:Q", y2="y1:Q", x=alt.datum(xmin), x2=alt.datum(xmax),
+            color=alt.Color("c:N", scale=alt.Scale(domain=["res", "sup"], range=[ASK, BID]), legend=None)))
+    nearest = alt.selection_point(nearest=True, on="pointerover", fields=["mcap"], empty=False)
+    line = alt.Chart(df).mark_line(color=ACCENT, strokeWidth=2).encode(y=y, x=x, order="mcap:Q")
+    tip = [alt.Tooltip("mcap:Q", title="Market cap", format="$,.0f" if a["usd"] else ",.0f"),
+           alt.Tooltip("from_now:Q", title="From now (%)", format="+.0f"),
+           alt.Tooltip("worth:Q", title="Your position worth", format="$,.0f")]
+    layers += [line, alt.Chart(df).mark_point(opacity=0).encode(y=y, x=x, tooltip=tip).add_params(nearest),
+               alt.Chart(df).mark_point(filled=True, size=70, color=MINT, stroke=PANEL, strokeWidth=2).encode(
+                   y=y, x=x, opacity=alt.condition(nearest, alt.value(1), alt.value(0)))]
+    marks = [(px, f"now · {pos_mcap(a, px)} · {dollars(pos * o['value'])}", TEXT, [], 0),
+             (o["top_px"], f"top of range · {pos_mcap(a, o['top_px'])}", MINT, [4, 4], 2),
+             (o["low_px"], f"bottom of range · {pos_mcap(a, o['low_px'])}", MINT, [4, 4], 3)]
+    if o["good"] and o["good"]["kind"] == "resistance":
+        marks.append((o["good"]["price"], f"good exit · {pos_mcap(a, o['good']['price'])} · {dollars(pos * o['good']['value'])}",
+                      STATUS_TEXT[1], [6, 3], 1))
+    if o["stop"]:
+        marks.append((o["stop"]["price"], f"exit if it breaks · {pos_mcap(a, o['stop']['price'])}", STATUS_TEXT[2], [6, 3], 1))
+    kept = []
+    for yv, text, c, dash, pri in sorted(marks, key=lambda m: m[4]):
+        if lo_p <= yv <= hi_p and all(abs(math.log(yv / kv)) >= 0.035 for kv, *_ in kept):
+            kept.append((yv, text, c, dash, pri))
+    for yv, text, c, dash, _ in kept:
+        md = pd.DataFrame([{"y": yv * sup * k, "label": text}])
+        layers += [alt.Chart(md).mark_rule(color=c, strokeDash=dash, strokeWidth=1.5 if dash else 1).encode(y="y:Q"),
+                   alt.Chart(md).mark_text(align="right", baseline="bottom", dx=-4, dy=-2, color=TEXT, fontSize=11).encode(
+                       y="y:Q", text="label:N", x=alt.datum(xmax))]
+    return (alt.layer(*layers).properties(width=CHART_W, height=380)
+            .configure(background="transparent", font="Inter, system-ui, sans-serif")
+            .configure_view(strokeWidth=0).configure_axis(**AXIS))
 
 
 def risk_section(a):
@@ -1309,6 +1536,8 @@ def res_why(z, usd):
     why = []
     if z["touches"]:
         why.append(f"pushed back {z['touches']}x this week")
+    if z.get("flips"):
+        why.append(f"{z['flips']} old floor{'s' if z['flips'] > 1 else ''} the price fell through")
     if z["ath"]:
         why.append("all-time high")
     if (z.get("under") or 0) >= 0.01:
@@ -1331,7 +1560,7 @@ def exit_section(a):
     if not e:
         return
     if e.get("single"):
-        return exit_section_single(a, e)
+        return None if a.get("open_pos") else exit_section_single(a, e)
     usd, qu = a["usd"], a["quote"]
     hours = f"{a['sleep_h']:g} hours"
     section("Where should you take profit?",
@@ -1424,9 +1653,10 @@ def resistance_details(a, e):
         table(["Level", "Calm arrival", "With momentum", "All"],
               [[k.capitalize() if k != "plain" else "Random level (no resistance)", cell(k, "calm"), cell(k, "momentum"),
                 cell(k, "all")] for k in ("strong", "medium", "weak", "plain")])
-        ui('<p class="hl-small">Resistance levels come from: prices that turned the price down 10%+ in the last 7 days, the '
-           'all-time high, sell walls in the pools, busy trading prices, and prices where many holders bought (they sell at '
-           'break-even). Strong = pushed back 3+ times, or 1–2 times with 3%+ of all coins at break-even there. Tested on the '
+        ui('<p class="hl-small">Resistance levels come from: prices that turned the price down 10%+ in the last 7 days, old '
+           'floors the price has fallen through (a floor often becomes a ceiling), the all-time high, sell walls in the pools, '
+           'busy trading prices, and prices where many holders bought (they sell at break-even). Strong = pushed back 3+ times, '
+           'or 1–2 times with 3%+ of all coins at break-even there or 2+ old floors there. Tested on the '
            '24 sample coins every 2 hours: a level "held" when the price touched it within 24 hours, did not go more than 5% '
            'above it in the next 6 hours, and fell 5%+.</p>')
 
@@ -1451,8 +1681,9 @@ def exit_section_single(a, e):
                      f"({price_str(px, usd, qu)}, mcap {money(px * sup, usd, qu)}), your LP sells the coin back into USDG on the "
                      "way up. Back at 0% you are 100% USDG again, with the fees on top — even while you sleep.")]
     if stall:
-        plan.append(("info", "On the way back up, a floor the price fell through often turns into a ceiling (a common chart "
-                             "rule, not tested by this tool). Floors inside your range: " + ", ".join(
+        plan.append(("info", "On the way back up, a floor the price fell through often turns into a ceiling (in tests on the "
+                             "sample coins, levels with 2+ broken floors turned the price back about 45% of the time, versus "
+                             "28% for a random level). Floors inside your range: " + ", ".join(
                                  f"{pct(z['drop'])} ({z['strength']}, mcap {money(z['price'] * sup, usd, qu)})" for z in stall)
                      + ". If the bounce stops under one of them and you don't want to wait, close the LP there by hand "
                        "(you get back part USDG, part coin)."))
@@ -1772,6 +2003,8 @@ def render(a):
     decision_card(a)
     ui('<p class="hl-small" style="margin:-6px 0 10px">📖 Not sure how to read a part? Open the <b>How to read the results</b> '
        'tab at the top of the page.</p>')
+    if a.get("open_pos"):
+        position_section(a)
     if a["breakout"]:
         ui(f'<div class="hl-note">{h(a["breakout"])}</div>')
     fdv = f["px"] * a["supply"]
@@ -1930,7 +2163,12 @@ def check_page(keys, ref):
                                         "a big position earns less per dollar because you share the fees with yourself.")
         conservative = c4.toggle("Extra careful mode", help="Says OK less often. In tests on busy coins, fewer crashes "
                                  "slipped through as OK (3.5% instead of 8.4%).")
-        at = st.text_input("Rewind to a past time (optional, UTC)", placeholder="2026-10-10 15:40",
+        c7, c8 = st.columns(2)
+        entry_txt = c7.text_input("Already open? Market cap when you opened (optional)", placeholder="e.g. 8.38M",
+                                  help="Have a position open already? Enter the market cap at the moment you opened it "
+                                       "(the top of your range for single-sided USDG). You get an exit plan for that "
+                                       "position, using your lower bound above. Leave empty to plan a new position.")
+        at = c8.text_input("Rewind to a past time (optional, UTC)", placeholder="2026-10-10 15:40",
                            help="See what the tool would have said at that moment, e.g. right before an old dump.")
         go = st.form_submit_button("Check now", type="primary", width="stretch")
     if not go:
@@ -1939,6 +2177,10 @@ def check_page(keys, ref):
     address = ca.strip().lower()
     if not (address.startswith("0x") and len(address) == 42):
         ui('<div class="hl-alert bad">That contract address is not valid (it must be 0x + 40 characters).</div>')
+        return
+    entry_mcap = parse_mcap(entry_txt)
+    if entry_txt.strip() and entry_mcap is None:
+        ui('<div class="hl-alert bad">Could not read that market cap. Write it like 8.38M, 850K or 8380000.</div>')
         return
     if not keys:
         ui('<div class="hl-alert bad">Add an Alchemy API key first (sidebar).</div>')
@@ -1979,7 +2221,8 @@ def check_page(keys, ref):
         with st.spinner("Comparing with the sample coins…"):
             a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72,
                        mode="conservative" if conservative else "balanced", position_usd=float(position),
-                       upper_pct=float(upper), stay_target=int(target[:-1]) / 100, single_sided=single)
+                       upper_pct=float(upper), stay_target=int(target[:-1]) / 100, single_sided=single,
+                       entry_mcap=entry_mcap)
         if not a:
             ui('<div class="hl-alert warn">This coin has no Uniswap pool or no buys yet, so it cannot be judged.</div>')
             return

@@ -184,11 +184,13 @@ def resistance_zones(tok, now_t, px_now, depth=None, cb=None, max_up=3.0):
     if not pv:
         return []
     S, top = tok.supply, px_now * (1 + max_up)
-    highs = []
+    highs, flips = [], []
     for sc in SWING_SCALES:
         highs += [(t, p, d) for t, p, d in swing_highs(pt, pv, now_t, sc)]
+        # floor yang sudah ditembus: swing low 7 hari (pernah memantul >= 10%) yang sekarang di atas harga
+        flips += [(t, p, b) for t, p, b in swing_lows(pt, pv, now_t, sc) if p > px_now * 1.01]
     ath = max(pv)
-    cands = [p for _, p, _ in highs]
+    cands = [p for _, p, _ in highs] + [p for _, p, _ in flips]
     if ath > px_now * 1.01:
         cands.append(ath)
     vol = volume_profile(tok.events, pt, pv, now_t)
@@ -228,7 +230,9 @@ def resistance_zones(tok, now_t, px_now, depth=None, cb=None, max_up=3.0):
             if last_t is None or t - last_t >= 2 * H:
                 touches.append(d)
             last_t = t
-        z = {"price": level, "up": level / px_now - 1, "touches": len(touches),
+        fl = sorted(t for t, p, _ in flips if lo <= p <= hi)
+        nfl = sum(1 for i, t in enumerate(fl) if i == 0 or t - fl[i - 1] >= 2 * H)
+        z = {"price": level, "up": level / px_now - 1, "touches": len(touches), "flips": nfl,
              "reject": max(touches) if touches else 0.0, "last_touch": hits[-1][0] if hits else None,
              "ath": lo <= ath <= hi, "vol_share": sum(x for b, x in vol.items() if lo <= 1.01 ** b <= hi) / vol_total,
              "under": float(under[1][(under[0] >= lo) & (under[0] <= hi)].sum() / S) if under is not None else None,
@@ -246,23 +250,26 @@ def resistance_zones(tok, now_t, px_now, depth=None, cb=None, max_up=3.0):
 
 
 RES_UNDER = 0.03   # >= 3% supply dipegang holder yang rugi dengan harga beli di zona ini
+RES_FLIPS = 2      # >= 2 floor yang sudah ditembus (swing low 7 hari yang sekarang di atas harga) di zona ini
 TIERS = ("weak", "medium", "strong")
 
 
-def res_tier(touches, under=None, wall_ratio=None):
+def res_tier(touches, under=None, wall_ratio=None, flips=0):
     """Kekuatan zona resistance, dikalibrasi di riwayat 24 koin (resistance_test): 3+ penolakan 7 hari = kuat, 1-2 =
     sedang, tanpa penolakan = lemah; >= 3% supply dipegang holder yang rugi di zona itu naik satu tingkat (terbukti:
     menolak ±41% vs ±33% tanpa). Tembok jual LP >= 2,5x sekitarnya juga naik satu tingkat (mekanika pool; likuiditas
-    historis tidak tersimpan, belum bisa diuji). ATH sendiri tidak dinaikkan (di koin sampel ATH justru sering tembus)."""
+    historis tidak tersimpan, belum bisa diuji). ATH sendiri tidak dinaikkan (di koin sampel ATH justru sering tembus).
+    Floor yang sudah ditembus jadi atap: >= 2 swing low 7 hari di zona itu naik satu tingkat (zona dengan 2+ floor
+    tembus menolak ±45% vs ±30% tanpa penolakan & tanpa floor; pemisahan tingkat jadi 27/35/43%)."""
     tier = 2 if touches >= 3 else 1 if touches >= 1 else 0
-    if (under or 0) >= RES_UNDER or (wall_ratio or 0) >= 2.5:
+    if (under or 0) >= RES_UNDER or (wall_ratio or 0) >= 2.5 or (flips or 0) >= RES_FLIPS:
         tier = min(2, tier + 1)
     return tier
 
 
 def rate_resistances(zones):
     for z in zones:
-        z["score"] = res_tier(z["touches"], z.get("under"), z.get("wall_ratio"))
+        z["score"] = res_tier(z["touches"], z.get("under"), z.get("wall_ratio"), z.get("flips"))
         z["strength"] = TIERS[z["score"]]
 
 
@@ -294,9 +301,14 @@ def summarize_resistance_test(rows):
     zones = [r for r in rows if r["kind"] == "zone"]
     out = {"zones": {}, "signals": {}}
     for i, name in enumerate(TIERS):
-        rs = [r for r in zones if res_tier(r["touches"], r.get("under")) == i]
+        rs = [r for r in zones if res_tier(r["touches"], r.get("under"), flips=r.get("flips")) == i]
         out["zones"][name] = {"all": stat(rs), "calm": stat([r for r in rs if not momentum(r)]),
                               "momentum": stat([r for r in rs if momentum(r)])}
+    for name, fn in (("0", lambda r: not r.get("flips")), ("1", lambda r: r.get("flips") == 1),
+                     ("2+", lambda r: (r.get("flips") or 0) >= 2)):
+        rs = [r for r in zones if fn(r)]
+        out.setdefault("flips", {})[name] = {"all": stat(rs), "calm": stat([r for r in rs if not momentum(r)]),
+                                             "momentum": stat([r for r in rs if momentum(r)])}
     plain = [r for r in rows if r["kind"] == "plain"]
     out["zones"]["plain"] = {"all": stat(plain), "calm": stat([r for r in plain if not momentum(r)]),
                              "momentum": stat([r for r in plain if momentum(r)])}
@@ -337,6 +349,7 @@ def resistance_test(tokens, step_h=2, window_h=24, signals=True):
                 tt, rej, drop = test(z["price"], t)
                 if tt is not None:
                     tok_rows.append({"tok": tok.symbol, "kind": "zone", "strength": z["strength"], "touches": z["touches"],
+                                     "flips": z["flips"],
                                      "ath": z["ath"], "under": z["under"] or 0.0, "vol_share": z["vol_share"],
                                      "t": tt, "rejected": rej, "drop": drop})
             for d in (0.1, 0.2, 0.3, 0.4):

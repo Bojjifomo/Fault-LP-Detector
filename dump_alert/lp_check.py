@@ -755,7 +755,7 @@ def model_factors(contrib, x, n=3, sign=1):
 
 
 def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48, mode="balanced",
-           position_usd=1000.0, upper_pct=None, stay_target=0.9, single_sided=False):
+           position_usd=1000.0, upper_pct=None, stay_target=0.9, single_sided=False, entry_mcap=None):
     """Penilaian lengkap untuk titik data terakhir (plus riwayat `history_h` jam untuk grafik);
     dipakai CLI dan web app."""
     if not tok._pt:
@@ -861,6 +861,9 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     exits = exit_plan(f, lv, best_range, own, tview, flow_now, ref)
     if single_sided:
         exits.update(single_exit(f, lv, best_range, range_pct))
+    # entry_mcap: market cap saat posisi dibuka, dalam USD (atau aset quote kalau kurs USD tidak ada)
+    open_pos = (position_plan(f, entry_mcap / (usd or 1.0) / tok.supply, range_pct, upper_pct, lv, best_range, own,
+                              exits.get("momentum")) if entry_mcap and range_pct > 0 else None)
 
     advice = {2: "Don't open an LP now. Wait for the danger signs to clear, then check again.",
               1: "High risk. If you still go in: small size, wide range, and keep an alarm on.",
@@ -891,7 +894,7 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "ref_names": [x["symbol"] for x in (ref or {}).get("tokens", []) if x["address"] != tok.address],
         "similarity_test": [x for x in (ref or {}).get("similarity_test", []) if x["address"] != tok.address],
         "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "upper_pct": upper_pct,
-        "single_sided": single_sided,
+        "single_sided": single_sided, "open_pos": open_pos,
         "sleep_h": sleep_h, "sims": [(d, lp_value(d, range_pct, upper_pct), lp_value(d, 0)) for d in (-0.2, -0.3, -0.5, -0.7)],
         "levels": lv, "tech": tview, "analogs": analog, "model_p": model_p,
         "feature_test": (ref or {}).get("feature_test"), "model": (ref or {}).get("dump_model"),
@@ -933,6 +936,8 @@ EXIT_SIGNALS = [
 ]
 HOLD_OK = 0.40   # zona yang dipakai untuk ambil untung: peluang menolak harga (uji) >= 40%
 MIN_TP = 0.08    # level ambil untung paling dekat: +8% dari harga sekarang
+OPEN_MIN_TP = 0.05  # posisi yang sudah dibuka: good exit minimal +5% (lebih dekat = praktis tutup sekarang)
+BREAK = 0.95     # floor dianggap jebol 5% di bawah tepi bawah zonanya (definisi yang sama dengan support_test)
 
 
 def exit_plan(f, lv, rec, own, tview, flow, ref):
@@ -980,6 +985,89 @@ def single_exit(f, lv, rec, plan_lower):
     lower = pick[0] if pick else plan_lower
     stall = [z for z in (lv or {}).get("zones", []) if -lower / 100 <= z["drop"] < 0]
     return {"single": True, "lower": lower, "stall": stall, "auto_exit": f["px"]}
+
+
+def parse_mcap(text):
+    """'8.38M', '$8,38m', '850k', '1.2b', '8380000' -> angka (None kalau kosong / tidak terbaca)."""
+    t = (text or "").strip().lower().replace("$", "").replace(" ", "").replace("usd", "")
+    if not t:
+        return None
+    mult = 1.0
+    for suf, m in (("jt", 1e6), ("rb", 1e3), ("k", 1e3), ("m", 1e6), ("b", 1e9)):
+        if t.endswith(suf):
+            t, mult = t[:-len(suf)], m
+            break
+    if mult > 1 and "," in t and "." not in t and t.count(",") == 1:
+        t = t.replace(",", ".")
+    try:
+        v = float(t.replace(",", "")) * mult
+    except ValueError:
+        return None
+    return v if v > 0 else None
+
+
+def lp_split(r, lower, upper):
+    """Isi posisi di rasio harga r = harga / harga buka: (nilai koin, nilai USDG) relatif ke modal awal."""
+    sa, sb = math.sqrt(1 - lower / 100), math.sqrt(1 + upper / 100)
+    sp = min(max(math.sqrt(r), sa), sb)
+    v0 = 2 - sa - 1 / sb if sa < 1 < sb else (1 - sa if sb <= 1 else 1 / sa - 1 / sb)  # nilai di harga buka per likuiditas
+    return r * (1 / sp - 1 / sb) / v0, (sp - sa) / v0
+
+
+def position_plan(f, entry_px, lower, upper, lv, rec, own, mom):
+    """Rencana exit untuk posisi yang SUDAH dibuka: range dari harga buka (entry_px) -lower% .. +upper% (upper 0 =
+    single-sided USDG). Dari harga sekarang: posisi ada di mana (di atas / di dalam / di bawah range), isinya (koin vs
+    USDG) dan nilainya; target di atas harga = zona resistance antara harga sekarang dan batas atas (termasuk floor yang
+    sudah ditembus — teruji jadi atap) plus batas atas sendiri (exit otomatis); 'good exit' = tepat di bawah zona
+    pertama yang cukup kuat (peluang menolak >= 40% sesuai momentum sekarang), kalau tidak ada: batas atas. Batas
+    keluar di bawah = floor strong/medium terdekat. Peluang tersentuh selama jam tidur dari riwayat koin ini & situasi
+    serupa. Nilai relatif ke modal awal, belum termasuk fee yang sudah didapat."""
+    import numpy as np
+    px = f["px"]
+    pa, pb = entry_px * (1 - lower / 100), entry_px * (1 + upper / 100)
+    peer_max, peer_min = (rec or {}).get("peer_max"), (rec or {}).get("peer_min")
+
+    def value(p):
+        return lp_value(p / entry_px - 1, lower, upper)
+
+    def reach(p):
+        up = p >= px
+        ok = []
+        if own is not None:
+            ok.append(float(np.mean(own[1] >= p / px)) if up else float(np.mean(own[0] <= p / px)))
+        src = peer_max if up else peer_min
+        if src is not None and len(src):
+            ok.append(float(np.mean(src >= p / px)) if up else float(np.mean(src <= p / px)))
+        return max(ok) if ok else None
+
+    def row(kind, p, **kw):
+        return {"kind": kind, "price": p, "from_now": p / px - 1, "value": value(p), "reach": reach(p), **kw}
+    state = "above" if px >= pb else "below" if px <= pa else "in"
+    coin, usdg = lp_split(px / entry_px, lower, upper)
+    out = {"entry_px": entry_px, "lower": lower, "upper": upper, "low_px": pa, "top_px": pb, "state": state,
+           "value": value(px), "coin": coin, "usdg": usdg, "break_even": entry_px if upper > 0 else pb,
+           "momentum": mom}
+    zones = [z for z in (lv or {}).get("res") or [] if z["price"] * (1 - levels.ZONE) < pb * 0.99]
+    targets = []
+    if state != "above":
+        for z in zones:
+            lo = z["price"] * (1 - levels.ZONE)
+            if lo <= px * 1.02:
+                continue
+            targets.append(row("resistance", lo, zone=z, hold=z.get("hold"),
+                               strong_enough=lo >= px * (1 + OPEN_MIN_TP) and
+                               ((z.get("hold") or 0) >= HOLD_OK or z["strength"] == "strong" and not mom)))
+        targets.append(row("top", pb))
+    good = next((t for t in targets if t["kind"] == "resistance" and t["strong_enough"]), None) or \
+        next((t for t in targets if t["kind"] == "top"), None)
+    after = None
+    if good and good["kind"] == "resistance":
+        after = next((t for t in targets if t["price"] > good["price"] and (t["kind"] == "top" or t["strong_enough"])), None)
+    floor = next((z for z in (lv or {}).get("zones", []) if z["strength"] in ("strong", "medium")), None)
+    stop = row("stop", floor["price"] * (1 - levels.ZONE) * BREAK, zone=floor) if floor else None
+    bottom = row("bottom", pa) if pa < px else None
+    out.update(targets=targets, good=good, after=after, stop=stop, bottom=bottom, now=row("now", px))
+    return out
 
 
 def own_windows(tok, t, sleep_h, min_n=100):
@@ -1150,8 +1238,18 @@ def report_text(a) -> str:
         if pk and sf.get("mode") == "single":
             L.append(f"Safe single-sided USDG range: {pk['label']} — hits the bottom {pk['hit_low'] * 100:.1f}% of similar nights, "
                      f"average {pk['mean'] * 100:+.1f}%, 1-in-10 bad case {pk['p10'] * 100:+.1f}%, fees {pk['fees'] * 100:+.1f}%")
+    o = a.get("open_pos")
+    if o:
+        mc = a["supply"] * (a["usd"] or 1)
+        L += ["", f"Open position (entry mcap {o['entry_px'] * mc:,.0f}): {o['state']} the range, worth {o['value'] * 100:.1f}% "
+                  f"of the deposit (fees not included), {o['coin'] / max(o['value'], 1e-9) * 100:.0f}% coin"]
+        for t in sorted(o["targets"] + [x for x in (o["stop"], o["bottom"]) if x], key=lambda t: -t["price"]):
+            tag = "GOOD EXIT " if t is o["good"] else ""
+            name = t["kind"] if t["kind"] != "resistance" else f"{t['zone']['strength']} resistance"
+            L.append(f"  {tag}{name}: mcap {t['price'] * mc:,.0f} ({t['from_now'] * 100:+.0f}%), worth {t['value'] * 100:.1f}%, "
+                     f"reached {(t['reach'] or 0) * 100:.0f}% of {a['sleep_h']:g}h windows")
     ex = a.get("exits") or {}
-    if ex.get("single"):
+    if ex.get("single") and not o:
         L.append("Exit: automatic at today's price (the LP sells any coin bought on a dip back into USDG); floors inside the "
                  "range where a bounce may stall: " + (", ".join(f"{z['drop'] * 100:+.0f}% ({z['strength']})" for z in ex["stall"])
                                                        or "none"))
@@ -1190,6 +1288,7 @@ def main():
     ap.add_argument("--range", type=float, default=20, help="lebar range LP ± persen; 0 = full range (default 20)")
     ap.add_argument("--sleep", type=float, default=8, help="lama posisi ditinggal, jam (default 8)")
     ap.add_argument("--single", action="store_true", help="single-sided USDG: range dari harga sekarang (0%%) turun ke -RANGE%%")
+    ap.add_argument("--entry-mcap", help="posisi sudah dibuka: market cap saat buka (mis. 8.38M) -> rencana exit")
     ap.add_argument("--no-fetch", action="store_true", help="pakai data lokal tanpa update")
     ap.add_argument("--at", help="nilai seolah sekarang adalah waktu ini, UTC 'YYYY-MM-DD HH:MM' (pakai data lokal)")
     ap.add_argument("--backtest", action="store_true", help="uji vonis di semua token di dump_alert/data/")
@@ -1266,7 +1365,7 @@ def main():
     if args.at:
         ds = truncate(ds, parse_time(args.at))
     a = assess(Token(ds), args.range, args.sleep, load_reference(), None if args.no_fetch else eth_usd(),
-               single_sided=args.single)
+               single_sided=args.single, entry_mcap=parse_mcap(args.entry_mcap))
     print(report_text(a) if a else "belum ada data harga/transaksi beli — tidak bisa dinilai.")
 
 

@@ -17,6 +17,8 @@ GUIDE = {
             "<b>alarm</b>.",
             "Plan your exit: single-sided USDG exits by itself when the price comes back to today's price. Two-sided: the "
             "<b>Take profit</b> line shows the resistance to sell at (set your upper bound just under it).",
+            "Already have a position open? Type the market cap when you opened it in <b>Already open?</b> (with your lower "
+            "bound in the slider): you get an exit plan with 3 scenarios — bounce, breakout, drop.",
         ],
         "pos_title": "Your position type — and what the upper bound is",
         "pos": [
@@ -57,6 +59,24 @@ GUIDE = {
              ["Green box with \"Open the safe range …\"."],
              ["Red box, or the line \"similar past moments crashed more often than the model says\" (then use a smaller "
               "amount)."]),
+            ("Your open position: exit plan",
+             "Only when you fill in <b>Already open?</b>: where your position stands now and where to get out, from the "
+             "market cap you opened at, your range and today's market cap.",
+             ["<b>Where the price is</b>: in your range (part coin, part USDG, earning fees), above it (100% USDG, nothing "
+              "to sell) or below it (100% coin, no fees).",
+              "<b>Your position now</b>: what it is worth in dollars and how much is coin vs USDG. Fees already earned are "
+              "not included (Uniswap shows them).",
+              "<b>Scenario 1 — the bounce stalls (good exit)</b>: the first resistance above the price that is strong enough "
+              "(turned the price back 40%+ of the time in tests, at least +5% away). Close by hand just under it.",
+              "<b>Scenario 2 — breakout</b>: if the price closes 5%+ above that level, hold for the next one; at the top of "
+              "your range the LP turns 100% USDG by itself.",
+              "<b>Scenario 3 — drop</b>: the floor below the price; if it breaks (5% below the floor zone), close the LP.",
+              "The chart: the line is what your position is worth at each market cap. The table lists every level with its "
+              "dollar value and how often the price got there in a night like this.",
+              "Resistance also counts old floors the price fell through: in tests a level with 2+ broken floors turned the "
+              "price back about 45% of the time, versus 28% for a random level."],
+             ["A strong resistance within reach (\"Gets there\" 40%+), and the drop scenario far away."],
+             ["Verdict AVOID (close now), or the floor to break is very close."]),
             ("Coin tiles",
              "Four numbers about the coin right now.",
              ["<b>Market cap</b>: price × all coins.",
@@ -171,7 +191,7 @@ GUIDE = {
               "<b>Automatic exit</b>: set your LP's upper bound there. If the price climbs into the resistance, your LP sells "
               "the coin for USDG on the way up, even while you sleep.",
               "<b>Strength</b>: strong = pushed the price back 3+ times this week (or 1–2 times with many holders at "
-              "break-even there).",
+              "break-even there, or 2+ old floors the price fell through — a broken floor often becomes a ceiling).",
               "<b>Turned the price back in tests</b>: how often levels like this held when the price reached them (about 4 in "
               "10; then the price usually fell ~20%).",
               "<b>Chance to reach</b>: how often the price touched that level during a night like this.",
@@ -226,6 +246,10 @@ GUIDE = {
             ("Single-sided USDG", "You add only USDG. The range runs from today's price down to your lower bound (e.g. 0% to "
                                   "-65%)."),
             ("Two-sided", "You add USDG and the coin. The range goes below and above today's price (e.g. -65% / +65%)."),
+            ("Entry market cap", "The market cap when you opened your position (for single-sided USDG: the top of your "
+                                 "range)."),
+            ("Good exit", "Where to close an open position: just under the first strong resistance above the price, or the "
+                          "top of your range if nothing strong is in the way."),
             ("Out of range (OOR)", "The price left your range. Below: you hold only the coin. Above: you hold only USDG "
                                    "(no loss, but no fees)."),
             ("Crash", "The price falls 30% or more within the hours you are away."),
@@ -271,6 +295,8 @@ GUIDE = {
             "<b>alarm</b>.",
             "Rencanakan exit: single-sided USDG keluar sendiri saat harga kembali ke harga hari ini. Two-sided: baris "
             "<b>Take profit</b> menunjukkan resistance tempat menjual (pasang batas atas tepat di bawahnya).",
+            "Sudah punya posisi terbuka? Isi market cap saat kamu buka di <b>Already open?</b> (batas bawahmu di slider): "
+            "kamu dapat rencana exit dengan 3 skenario — pantul, tembus, turun.",
         ],
         "pos_title": "Jenis posisimu — dan apa itu upper bound",
         "pos": [
@@ -311,6 +337,24 @@ GUIDE = {
              ["Kotak hijau dengan \"Open the safe range …\"."],
              ["Kotak merah, atau kalimat \"similar past moments crashed more often than the model says\" (pakai jumlah "
               "lebih kecil)."]),
+            ("Your open position: exit plan",
+             "Hanya muncul kalau kamu isi <b>Already open?</b>: posisi kamu sekarang di mana dan di mana sebaiknya keluar, "
+             "dari market cap saat buka, range-mu, dan market cap sekarang.",
+             ["<b>Where the price is</b>: di dalam range (sebagian koin, sebagian USDG, dapat fee), di atas range (100% USDG, "
+              "tidak ada yang dijual), atau di bawah range (100% koin, tidak dapat fee).",
+              "<b>Your position now</b>: nilai posisimu dalam dolar dan porsi koin vs USDG. Fee yang sudah didapat tidak "
+              "dihitung (lihat di Uniswap).",
+              "<b>Scenario 1 — the bounce stalls (good exit)</b>: resistance pertama di atas harga yang cukup kuat (menahan "
+              "harga 40%+ saat diuji, minimal +5% dari harga sekarang). Tutup manual tepat di bawahnya.",
+              "<b>Scenario 2 — breakout</b>: kalau harga ditutup 5%+ di atas level itu, tahan sampai level berikutnya; di "
+              "batas atas range LP otomatis jadi 100% USDG.",
+              "<b>Scenario 3 — drop</b>: floor di bawah harga; kalau jebol (5% di bawah zona floor), tutup LP.",
+              "Grafiknya: garis = nilai posisimu di tiap market cap. Tabel berisi semua level dengan nilai dolarnya dan "
+              "seberapa sering harga sampai ke sana dalam satu malam seperti ini.",
+              "Resistance juga menghitung floor lama yang sudah ditembus: saat diuji, level dengan 2+ floor jebol menahan harga "
+              "±45%, dibanding ±28% untuk level acak."],
+             ["Resistance kuat yang terjangkau (\"Gets there\" 40%+), dan skenario turun masih jauh."],
+             ["Vonis AVOID (tutup sekarang), atau floor yang bisa jebol sudah sangat dekat."]),
             ("Coin tiles",
              "Empat angka tentang koin saat ini.",
              ["<b>Market cap</b>: harga × semua koin.",
@@ -429,7 +473,7 @@ GUIDE = {
               "<b>Automatic exit</b>: pasang batas atas LP di situ. Kalau harga naik ke resistance, LP otomatis menjual koin "
               "jadi USDG saat harga naik, walau kamu sedang tidur.",
               "<b>Strength</b>: strong = menolak harga 3+ kali minggu ini (atau 1–2 kali dengan banyak holder balik modal di "
-              "situ).",
+              "situ, atau ada 2+ floor lama yang sudah ditembus — floor yang jebol sering jadi atap).",
               "<b>Turned the price back in tests</b>: seberapa sering level seperti ini menahan harga saat tersentuh (sekitar "
               "4 dari 10; sesudahnya harga biasanya turun ~20%).",
               "<b>Chance to reach</b>: seberapa sering harga menyentuh level itu dalam satu malam seperti ini.",
@@ -484,6 +528,9 @@ GUIDE = {
             ("Single-sided USDG", "Kamu hanya memasukkan USDG. Range dari harga sekarang turun ke batas bawah (misalnya 0% "
                                   "sampai -65%)."),
             ("Two-sided", "Kamu memasukkan USDG dan koin. Range di bawah dan di atas harga sekarang (misalnya -65% / +65%)."),
+            ("Entry market cap", "Market cap saat kamu membuka posisi (untuk single-sided USDG: batas atas range-mu)."),
+            ("Good exit", "Tempat menutup posisi yang sudah terbuka: tepat di bawah resistance kuat pertama di atas harga, atau "
+                          "batas atas range kalau tidak ada yang kuat di depan."),
             ("Out of range (OOR)", "Harga keluar dari range. Di bawah: kamu hanya memegang koin. Di atas: kamu hanya "
                                    "memegang USDG (tidak rugi, tapi tidak dapat fee)."),
             ("Crash", "Harga turun 30% atau lebih selama jam kamu pergi."),

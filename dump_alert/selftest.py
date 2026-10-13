@@ -181,6 +181,7 @@ def levels_case():
     r1 = min(rz, key=lambda r: abs(r["price"] - 1.0))
     assert abs(r1["price"] - 1.0) < 0.02 and r1["touches"] >= 2 and abs(r1["under"] - 0.05) < 1e-9, rz
     assert r1["strength"] == "strong" and levels.res_tier(2) == 1 and levels.res_tier(0, 0.04) == 1 and levels.res_tier(3) == 2
+    assert levels.res_tier(0, flips=2) == 1 and levels.res_tier(1, flips=2) == 2 and levels.res_tier(0, flips=1) == 0
     assert levels.momentum({"rsi1h": 72}) and levels.momentum({"vol_ratio2": 2.5}) and not levels.momentum({"rsi1h": 60})
     rows_ = [{"kind": "zone", "touches": 3, "under": 0.0, "rejected": True, "drop": 0.2, "rsi1h": 50},
              {"kind": "zone", "touches": 3, "under": 0.0, "rejected": False, "drop": 0.0, "rsi1h": 75},
@@ -257,9 +258,42 @@ def ranges_case():
     assert levels.depth_curve_up({k: v for k, v in p0.items() if k != "up"}, 18) is None
 
 
+def position_case():
+    """Rencana exit posisi terbuka: parse market cap, isi posisi, status range, good exit, batas keluar."""
+    import numpy as np
+    from .lp_check import lp_split, parse_mcap, position_plan
+    assert parse_mcap("8.38M") == 8.38e6 * 1 or abs(parse_mcap("8.38M") - 8.38e6) < 1e-3
+    assert abs(parse_mcap("$8,38m") - 8.38e6) < 1e-3 and parse_mcap("850k") == 850e3 and parse_mcap("8,380,000") == 8.38e6
+    assert parse_mcap("") is None and parse_mcap("abc") is None and parse_mcap("-5") is None
+    for r in (1.2, 1.0, 0.8, 0.5):
+        for lo, up in ((65, 0), (50, 60)):
+            c, u = lp_split(r, lo, up)
+            assert abs(c + u - lp_value(r - 1, lo, up)) < 1e-9 and c >= 0 and u >= 0, (r, lo, up)
+    # single-sided -65% dibuka di harga 1,0; sekarang 0,8 (di dalam range). Resistance di +3% (terlalu dekat), +10%
+    # (kuat) dan +18%; floor kuat di -10%. Good exit = +10%, sesudahnya +18%, lalu batas atas.
+    def z(up, strength, hold):
+        return {"price": 0.8 * (1 + up) / (1 - levels.ZONE), "up": up, "strength": strength, "hold": hold}
+    lv = {"res": [z(0.03, "strong", 0.44), z(0.10, "strong", 0.44), z(0.18, "weak", 0.14), z(0.20, "medium", 0.42)],
+          "zones": [{"price": 0.72, "drop": -0.1, "strength": "strong"}]}
+    rec = {"peer_max": np.linspace(1.0, 1.4, 101), "peer_min": np.linspace(0.6, 1.0, 101)}
+    o = position_plan({"px": 0.8}, 1.0, 65, 0, lv, rec, None, False)
+    assert o["state"] == "in" and abs(o["value"] - lp_value(-0.2, 65, 0)) < 1e-12 and o["break_even"] == 1.0
+    assert o["good"]["kind"] == "resistance" and abs(o["good"]["from_now"] - 0.10) < 1e-9, o["good"]
+    assert o["after"]["zone"]["up"] == 0.20 and o["targets"][-1]["kind"] == "top", o["after"]
+    assert abs(o["stop"]["price"] - 0.72 * (1 - levels.ZONE) * 0.95) < 1e-12 and o["bottom"]["price"] == 0.35
+    assert abs(o["targets"][-1]["reach"] - np.mean(rec["peer_max"] >= 1.25)) < 1e-12
+    # momentum: medium (42%) tetap boleh, karena hold sudah mengikuti momentum; tanpa resistance kuat -> batas atas
+    o = position_plan({"px": 0.8}, 1.0, 65, 0, {"res": [z(0.18, "weak", 0.14)], "zones": []}, rec, None, True)
+    assert o["good"]["kind"] == "top" and o["stop"] is None
+    assert position_plan({"px": 1.3}, 1.0, 65, 0, lv, rec, None, False)["state"] == "above"
+    b = position_plan({"px": 0.3}, 1.0, 65, 0, {"res": [], "zones": []}, rec, None, False)
+    assert b["state"] == "below" and b["usdg"] == 0 and abs(b["value"] - 0.3 / 0.35 ** 0.5) < 1e-9
+
+
 def main():
     levels_case()
     ranges_case()
+    position_case()
     # banyak key: key kuota habis dilewati, key yang kena batas per detik dipelankan lalu dipakai lagi
     assert parse_keys("k1, k2\nk3", ["k2", "https://robinhood-mainnet.g.alchemy.com/v2/k4"], None) == ["k1", "k2", "k3", "k4"]
     rpc = PacedRPC(["https://selftest.invalid/v2/SECRETKEYA", "https://selftest.invalid/v2/SECRETKEYB"])

@@ -362,6 +362,7 @@ class Ranges:
                 "heat": heat, "lo": list(LO), "hi": list(HI), "n": int(mask.sum()),
                 "coins": len({int(x) for x in self.tok[mask]}), "vol_bucket": vb, "level": level,
                 "steps": steps, "r": r, "share": share, "test": self.test, "peer_max": self.P[mask, :steps].max(1),
+                "peer_min": self.P[mask, :steps].min(1),
                 "safe_test": self.safe_test, "safe_test_single": self.safe_test_single}
 
 

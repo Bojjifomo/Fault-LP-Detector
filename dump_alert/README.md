@@ -264,27 +264,51 @@ buruknya lebih ringan. Hasil uji disimpan di `ranges.npz` (`safe_test_single`).
 
 Exit single-sided: tidak ada koin yang dijual di atas harga sekarang. Kalau harga turun masuk range lalu kembali,
 LP otomatis menjual koin kembali jadi USDG sampai 0%. Floor di dalam range yang ditembus bisa jadi atap saat harga
-memantul (aturan chart umum, tidak diuji di tool ini) — tempat menutup LP manual kalau tidak mau menunggu.
+memantul (teruji: zona dengan 2+ floor yang sudah ditembus menolak harga ±45% vs ±28% level acak) — tempat menutup LP
+manual kalau tidak mau menunggu.
 
 CLI: `python -m dump_alert.lp_check <CA> --single --range 65`.
+
+### Rencana exit untuk posisi yang sudah terbuka
+
+Isi **Already open? Market cap when you opened** (misalnya `8.38M`) plus batas bawah di slider. Dari market cap saat
+buka (= batas atas untuk single-sided), range, dan market cap sekarang:
+
+- **Posisi di mana**: di dalam range (sebagian koin, sebagian USDG), di atas (100% USDG — tidak ada yang dijual), atau di
+  bawah (100% koin, tidak dapat fee). Nilai posisi sekarang dalam dolar dan porsi koin vs USDG (rumus Uniswap v3/v4,
+  belum termasuk fee yang sudah didapat).
+- **Skenario 1 — pantulan tertahan (good exit)**: zona resistance pertama di atas harga yang cukup kuat (menahan ≥40% di
+  uji sesuai momentum sekarang, minimal +5% dari harga sekarang), di bawah batas atas range. Tutup manual tepat di
+  bawah zona; nilainya dalam dolar dan peluang harga sampai ke sana selama jam tidur.
+- **Skenario 2 — tembus**: kalau ditutup 5%+ di atas level itu, target berikutnya; di batas atas LP otomatis 100% USDG.
+- **Skenario 3 — turun**: floor strong/medium terdekat di bawah harga; dianggap jebol 5% di bawah tepi bawah zonanya
+  (definisi yang sama dengan uji support) → tutup LP. Juga nilai di batas bawah range.
+- Grafik nilai posisi per market cap (vertikal), tabel semua level, dan satu baris di kotak jawaban paling atas.
+
+CLI: `python -m dump_alert.lp_check <CA> --single --range 65 --entry-mcap 4.6M`.
 
 ### Exit di resistance kuat (ambil untung, two-sided)
 
 Zona resistance di atas harga (±4%) dikumpulkan dari: harga yang menolak harga turun ≥10% dalam 7 hari terakhir
-(swing high), ATH, tembok jual di pool (likuiditas sisi atas ≥2,5x sekitarnya), harga dengan volume tinggi, dan
-**harga beli rata-rata holder yang sedang rugi** (mereka cenderung menjual saat balik modal; dihitung dari semua
-wallet). Kekuatan: 3+ penolakan = strong, 1–2 = medium, tanpa penolakan = weak; ≥3% supply dipegang holder rugi di
-zona itu menaikkan satu tingkat (tembok jual juga, berdasarkan mekanika pool).
+(swing high), **floor lama yang sudah ditembus** (swing low 7 hari yang sekarang di atas harga), ATH, tembok jual di
+pool (likuiditas sisi atas ≥2,5x sekitarnya), harga dengan volume tinggi, dan **harga beli rata-rata holder yang sedang
+rugi** (mereka cenderung menjual saat balik modal; dihitung dari semua wallet). Kekuatan: 3+ penolakan = strong, 1–2 =
+medium, tanpa penolakan = weak; naik satu tingkat kalau ≥3% supply dipegang holder rugi di zona itu, atau ada ≥2 floor
+lama yang sudah ditembus (tembok jual juga, berdasarkan mekanika pool).
 
-Diuji di riwayat 24 koin tiap 2 jam (8.318 sentuhan): level "menahan" kalau dalam 6 jam setelah disentuh harga tidak
+Diuji di riwayat 24 koin tiap 2 jam (8.531 sentuhan): level "menahan" kalau dalam 6 jam setelah disentuh harga tidak
 tembus >5% di atas zona dan turun ≥5%.
 
 | Level | Datang tenang | Datang dengan momentum (RSI 1j ≥70 atau volume ≥2x) | Semua |
 |---|---|---|---|
-| strong | 42% | 42% | 42% |
-| medium | 42% | 27% | 36% |
-| weak | 40% | 16% | 30% |
-| level acak | 38% | 23% | 31% |
+| strong | 44% | 43% | 43% |
+| medium | 42% | 25% | 35% |
+| weak | 35% | 14% | 27% |
+| level acak | 38% | 20% | 28% |
+
+**Floor yang jebol jadi atap** (teruji): zona dengan 0 / 1 / 2+ floor lama yang sudah ditembus menahan harga 34% / 33% /
+45% (2+ floor: 46% datang tenang, 44% dengan momentum). Dengan aturan "2+ floor = naik satu tingkat", pemisahan
+strong / medium / weak jadi 43% / 35% / 27% (sebelumnya 42% / 38% / 29%).
 
 Saat menahan, harga biasanya turun ±20%. Temuan penting: sinyal "overbought" (RSI ≥70, volume melonjak, di atas pita
 Bollinger atas, jauh di atas EMA20) saat menyentuh resistance justru membuat level **lebih sering tembus** (menahan
