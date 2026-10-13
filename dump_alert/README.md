@@ -57,6 +57,11 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
     menyebut tanda yang masih kurang), **Chart and on-chain indicators**.
 11. Grafik 72 jam, **If you sleep** (nilai posisimu dalam dolar kalau harga turun 30% / 50%), alarm, rincian filter.
 
+**Tab "📖 How to read the results"** (di atas halaman): panduan membaca dalam bahasa Inggris atau Bahasa
+Indonesia (pilih di tab itu) — cara cepat 30 detik, arti 4 kemungkinan jawaban, penjelasan tiap bagian sesuai
+urutan halaman (isinya, cara membaca, tanda bagus, tanda bahaya), checklist sebelum buka LP, dan daftar istilah.
+Isinya ada di `dump_alert/guide.py`.
+
 Bahasa tampilan dibuat sederhana: kalimat pendek tanpa istilah teknis, angka hasil dalam dolar, dan penjelasan
 metode dipindah ke bagian lipat **How is this calculated?**.
 

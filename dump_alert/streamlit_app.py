@@ -45,6 +45,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from dump_alert import ranges as rg  # noqa: E402
+from dump_alert.guide import GUIDE  # noqa: E402
 from dump_alert.fetch import Fetcher, QuotaError, data_path, eth_usd, make_rpc, parse_keys  # noqa: E402
 from dump_alert.levels import ZONE  # noqa: E402
 from dump_alert.lp_check import (SIGNS, STEP, VERDICTS, assess, load_reference,  # noqa: E402
@@ -112,6 +113,8 @@ button[kind="primaryFormSubmit"] p, [data-testid="stBaseButton-primaryFormSubmit
 [data-testid="stExpander"] details {{ background:var(--panel) !important; border:1px solid var(--border) !important;
         border-radius:10px !important; }}
 [data-testid="stExpander"] summary, [data-testid="stExpander"] summary p {{ color:var(--text) !important; }}
+[data-testid="stExpander"] summary {{ background:var(--panel) !important; border-radius:10px; }}
+[data-testid="stExpander"] summary:hover {{ background:var(--panel2) !important; }}
 [data-testid="stExpander"] summary:hover p {{ color:var(--accent) !important; }}
 [data-testid="stAlert"] {{ background:var(--panel2) !important; border:1px solid var(--border) !important; color:var(--text) !important; }}
 code {{ background:var(--panel2) !important; color:var(--mint) !important; border-radius:6px; padding:1px 6px; }}
@@ -193,6 +196,36 @@ table.hl .yes {{ color:var(--good-t); }} table.hl .no {{ color:var(--muted); }}
 .hl-dec li {{ margin:4px 0; font-size:14px; color:var(--text); line-height:1.5; }}
 .hl-dec li b {{ color:var(--text); }}
 .hl-verdict .s b {{ color:var(--text); }}
+[data-baseweb="tab-list"] {{ gap:6px; border-bottom:1px solid var(--border); }}
+[data-baseweb="tab"] {{ background:transparent !important; }}
+[data-baseweb="tab"] p {{ color:var(--muted) !important; font-size:15px !important; font-weight:600; }}
+[data-baseweb="tab"][aria-selected="true"] p {{ color:var(--accent) !important; }}
+[data-baseweb="tab-highlight"] {{ background-color:var(--accent) !important; }}
+[data-baseweb="tab-border"] {{ background-color:var(--border) !important; }}
+[data-testid="stRadio"] label p {{ color:var(--text) !important; }}
+ol.hl-steps {{ margin:4px 0 8px; padding-left:22px; }}
+ol.hl-steps li {{ margin:6px 0; font-size:15px; color:var(--text); line-height:1.5; }}
+.hl-gboxes {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }}
+@media (max-width:640px) {{ .hl-gboxes {{ grid-template-columns:1fr; }} }}
+.hl-card.hl-mini {{ margin:0; padding:10px 14px; }}
+.hl-card.hl-mini .t {{ font-size:15px; }}
+.hl-card.hl-mini .s {{ font-size:13px; }}
+[data-testid="stMarkdownContainer"] p.hl-gwhat {{ font-size:14px; color:var(--text); margin:2px 0 8px; }}
+[data-testid="stMarkdownContainer"] p.hl-glab {{ font-size:12px; color:var(--muted); text-transform:uppercase;
+        letter-spacing:.06em; margin:8px 0 0; }}
+.hl-gpair {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:8px 0 4px; }}
+@media (max-width:640px) {{ .hl-gpair {{ grid-template-columns:1fr; }} }}
+.hl-gpair > div {{ background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 12px;
+        font-size:13px; color:var(--text); line-height:1.5; }}
+.hl-gpair .good {{ border-left:3px solid var(--good); }} .hl-gpair .good b {{ color:var(--good-t); }}
+.hl-gpair .bad {{ border-left:3px solid var(--bad); }} .hl-gpair .bad b {{ color:var(--bad-t); }}
+.hl-chips {{ display:flex; flex-wrap:wrap; gap:8px 16px; margin:6px 0 4px; font-size:13px; color:var(--text); }}
+.hl-chips span::before {{ content:""; display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px;
+        vertical-align:-1px; background:var(--c); }}
+ul.hl-checks {{ list-style:none; padding:0; margin:4px 0 8px; }}
+ul.hl-checks li {{ padding:7px 12px; margin:5px 0; background:var(--panel); border:1px solid var(--border); border-radius:8px;
+        font-size:14px; color:var(--text); }}
+ul.hl-checks li::before {{ content:"☐ "; color:var(--accent); font-weight:700; }}
 .hl-conc {{ background:var(--panel2); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px;
         padding:10px 14px; margin:12px 0 4px; font-size:14px; color:var(--text); line-height:1.5; }}
 .hl-conc .lab {{ display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent);
@@ -1344,6 +1377,8 @@ def sleep_section(a):
 def render(a):
     usd, f, qu = a["usd"], a["now"], a["quote"]
     decision_card(a)
+    ui('<p class="hl-small" style="margin:-6px 0 10px">📖 Not sure how to read a part? Open the <b>How to read the results</b> '
+       'tab at the top of the page.</p>')
     if a["breakout"]:
         ui(f'<div class="hl-note">{h(a["breakout"])}</div>')
     fdv = f["px"] * a["supply"]
@@ -1417,6 +1452,38 @@ def render(a):
                f'({when(pat["retest_t"])}).</p>')
 
 
+def guide_page():
+    """Tab 'How to read the results': a step-by-step reading guide in English or Indonesian."""
+    lang = st.radio("Language / Bahasa", ["English", "Bahasa Indonesia"], horizontal=True, key="guide_lang")
+    g = GUIDE["id" if lang.startswith("Bahasa") else "en"]
+    ui(f'<p class="hl-sub" style="margin:6px 0 4px">{g["intro"]}</p>')
+    ui(f'<div class="hl-h">{g["quick_title"]}</div><ol class="hl-steps">' + "".join(f"<li>{x}</li>" for x in g["quick"])
+       + "</ol>")
+    ui(f'<div class="hl-h">{g["boxes_title"]}</div><div class="hl-gboxes">' + "".join(
+        f'<div class="hl-card hl-verdict {c} hl-mini"><div class="t">{t}</div><div class="s">{d}</div></div>'
+        for c, t, d in g["boxes"]) + "</div>")
+    ui(f'<div class="hl-h">{g["sections_title"]}</div>')
+    for i, (title, what, how_, good, bad) in enumerate(g["sections"], 1):
+        with st.expander(f"{i}. {title}"):
+            extra = ""
+            if title == "Liquidity and price floors":
+                extra = ('<div class="hl-chips">' + "".join(f'<span style="--c:{c}">{n}</span>' for c, n in (
+                    (BID, "below the price"), (ASK, "above the price"), (VOL_C, "traded, 7 days"),
+                    ("rgba(151,252,228,.35)", "price floor / safe range"))) + "</div>")
+            elif title == "Last 72 hours":
+                extra = '<div class="hl-chips">' + "".join(f'<span style="--c:{c}">{v}</span>' for v, c in STATUS.items()) + "</div>"
+            ui(f'<p class="hl-gwhat"><b>{g["what"]}:</b> {what}</p>{extra}<p class="hl-glab">{g["how"]}</p><ul class="hl-list">'
+               + "".join(f'<li class="info">{x}</li>' for x in how_) + '</ul><div class="hl-gpair">'
+               + f'<div class="good"><b>✔ {g["good"]}</b>' + "".join(f"<div>{x}</div>" for x in good) + "</div>"
+               + f'<div class="bad"><b>✖ {g["bad"]}</b>' + "".join(f"<div>{x}</div>" for x in bad) + "</div></div>")
+    ui(f'<div class="hl-h">{g["check_title"]}</div><ul class="hl-checks">' + "".join(f"<li>{x}</li>" for x in g["check"])
+       + "</ul>")
+    ui(f'<div class="hl-h">{g["glossary_title"]}</div><div class="hl-kv">' + "".join(
+        f'<div class="k">{k}</div><div class="v">{v}</div>' for k, v in g["glossary"]) + "</div>")
+    ui(f'<div class="hl-h">{g["limits_title"]}</div>')
+    bullets([("warn", x) for x in g["limits"]])
+
+
 def main():
     ui(CSS)
     ref = load_reference()
@@ -1426,6 +1493,14 @@ def main():
        '<p class="hl-sub">Paste a coin\'s contract address. You get one clear answer — open, be careful, or wait — plus the '
        f'best LP range, who holds the coin and where money is flowing, all learned from {len(names) or 24} past coins.</p>')
     keys = api_keys()
+    t_check, t_guide = st.tabs(["🔍 Check a coin", "📖 How to read the results"])
+    with t_guide:
+        guide_page()
+    with t_check:
+        check_page(keys, ref)
+
+
+def check_page(keys, ref):
     with st.form("check"):
         ca = st.text_input("Contract address", placeholder="0x…")
         c1, c2 = st.columns(2)
@@ -1446,16 +1521,8 @@ def main():
         at = st.text_input("Rewind to a past time (optional, UTC)", placeholder="2026-10-10 15:40",
                            help="See what the tool would have said at that moment, e.g. right before an old dump.")
         go = st.form_submit_button("Check now", type="primary", width="stretch")
-    with st.expander("How to read the answer"):
-        ui('<ul class="hl-list">'
-           '<li class="bad"><b>🚫 Don\'t open</b>: high chance (35%+) that the price falls 30% or more while you sleep. In '
-           'tests, about half of these really crashed.</li>'
-           '<li class="warn"><b>⚠️ Risky</b>: a 15–35% chance, or a strong danger sign (big holders selling, price just '
-           'crashed, back at its old high, or the coin just launched).</li>'
-           '<li class="good"><b>✅ OK</b>: under 15%. Not a guarantee — coins can crash without warning, so keep the alarm on.'
-           '</li><li class="info">The first check of a coin takes a few minutes; after that it is fast. Coins that are still '
-           'on a bonding curve (no Uniswap pool yet) cannot be checked.</li></ul>')
     if not go:
+        ui(f'<div class="hl-note" style="margin-top:10px">{GUIDE["en"]["nudge"]}</div>')
         return
     address = ca.strip().lower()
     if not (address.startswith("0x") and len(address) == 42):
