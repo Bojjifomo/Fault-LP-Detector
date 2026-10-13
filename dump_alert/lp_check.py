@@ -21,9 +21,9 @@ import os
 import time
 
 from . import levels
-from .fetch import Fetcher, data_path, eth_usd, make_rpc
+from .fetch import Fetcher, data_path, eth_usd, make_rpc, sqrt_to_price
 from .patterns import retest_state
-from .signals import INFLOW, Token, find_dumps, launch_risk
+from .signals import INFLOW, ZERO, Token, find_dumps, launch_risk
 
 H = 3600
 H4 = 4 * H
@@ -780,10 +780,16 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     # pengali harga -> USD: 1 untuk harga dari pool USDG, harga ETH hari ini untuk pool ETH, None kalau tidak tahu
     usd = 1.0 if m.get("usd") else usd_per_eth if q in ("ETH", "WETH") else None
     pools = m.get("usdg_pools") or []
-    main = next((p for p in pools if p["pool_id"] == m.get("pool_id")), None)
+    lp = m.get("lp_pool") or m   # pool USDG tempat LP (data lama: sama dengan sumber harga)
+    main = next((p for p in pools if p["pool_id"] == lp.get("pool_id")), None)
     usdg = {"pools": pools, "main": main, "depth": 2 * main["usdg_side"] if main else None,
             "since_block": m.get("usdg_from_block"), "pre": (m.get("pre") or {}).get("pair_symbol")
-            or (m.get("pre") or {}).get("quote_symbol")} if m.get("kind") == "v4" else None
+            or (m.get("pre") or {}).get("quote_symbol"),
+            # sumber harga lain dari pool LP: harga pasar dari pool paling ramai, plus harga pool USDG-mu sendiri
+            "price_pool": None if not main or m.get("pool_id") == main["pool_id"] else
+            {"pair": m.get("pair_symbol") or m.get("quote_symbol"), "fee": m.get("fee")},
+            "pool_px": pool_price(m, main["pool_id"], tok.ds.get("decimals", 18)) if main else None} \
+        if m.get("kind") == "v4" else None
 
     calib = None
     if ref:
@@ -825,7 +831,7 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         if usdg["depth"] < 20_000:
             info.append(f"The USDG pool is thin (~${usdg['depth']:,.0f}): your position could be a big share of it, "
                         "and small sells move the price a lot.")
-    elif m.get("fee") == 0 and m.get("hooks"):
+    elif lp.get("fee") == 0 and lp.get("hooks"):
         info.append("The main pool's LP fee is 0 (the hook takes the swap fee). LPs in this pool earn no swap fees — "
                     "make sure you LP in a pool that pays fees.")
     if f["impact_top10"] is not None:
@@ -862,7 +868,8 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
     if single_sided:
         exits.update(single_exit(f, lv, best_range, range_pct))
     # entry_mcap: market cap saat posisi dibuka, dalam USD (atau aset quote kalau kurs USD tidak ada)
-    open_pos = (position_plan(f, entry_mcap / (usd or 1.0) / tok.supply, range_pct, upper_pct, lv, best_range, own,
+    supply = circulating_supply(tok)   # untuk market cap (tanpa koin yang di-burn), seperti DexScreener
+    open_pos = (position_plan(f, entry_mcap / (usd or 1.0) / supply, range_pct, upper_pct, lv, best_range, own,
                               exits.get("momentum")) if entry_mcap and range_pct > 0 else None)
 
     advice = {2: "Don't open an LP now. Wait for the danger signs to clear, then check again.",
@@ -882,7 +889,7 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
                                f"({b['match']} of {b['total']} signs match).")
     return {
         "symbol": tok.symbol, "name": tok.ds.get("name"), "address": tok.address, "quote": q,
-        "supply": tok.supply, "usd": usd, "eth_usd": usd_per_eth, "usdg": usdg, "market": m, "now": f, "rows": rows,
+        "supply": supply, "supply_total": tok.supply, "burned": tok.supply - supply, "usd": usd, "eth_usd": usd_per_eth, "usdg": usdg, "market": m, "now": f, "rows": rows,
         "level": level, "verdict": VERDICTS[level], "rule_level": rule_level, "mode": mode, "factors": factors, "calm_factors": calm,
         "hits": hits, "detail": detail,
         "filters": [{"code": c, "keras": k, "desc": d, "hit": hits[c], "detail": detail[c]} for c, k, d in FILTERS],
@@ -986,6 +993,31 @@ def single_exit(f, lv, rec, plan_lower):
     lower = pick[0] if pick else plan_lower
     stall = [z for z in (lv or {}).get("zones", []) if -lower / 100 <= z["drop"] < 0]
     return {"single": True, "lower": lower, "stall": stall, "auto_exit": f["px"]}
+
+
+def circulating_supply(tok):
+    """Supply untuk market cap, sama seperti DexScreener: total supply sekarang (mint - burn ke 0x0, dari riwayat
+    transfer) dikurangi koin di alamat burn (0x…dead) yang tidak akan pernah beredar. tok.supply (totalSupply saat data
+    pertama ditarik) tetap dipakai untuk porsi 'dari semua koin'."""
+    from .holders import BURN
+    dec, mint, burn, dead = tok.ds.get("decimals", 18), 0, 0, 0
+    for x in tok.ds.get("transfers") or []:
+        frm, to, v = x[3], x[4], x[5]
+        mint += v if frm == ZERO else 0
+        burn += v if to == ZERO else 0
+        dead += (v if to in BURN else 0) - (v if frm in BURN else 0)
+    total = (mint - burn) / 10 ** dec
+    if not 0.5 * tok.supply <= total <= 1.01 * tok.supply:  # mint tidak lewat Transfer standar: pakai totalSupply
+        total = tok.supply
+    return max(total - max(dead, 0) / 10 ** dec, 0.01 * total)
+
+
+def pool_price(m, pool_id, dec_token):
+    """Harga token di pool `pool_id` (USD) dari peta likuiditas terakhir (paling lama 15 menit); None kalau tidak ada."""
+    p = next((x for x in ((m.get("book") or {}).get("pools") or []) if x["pool_id"] == pool_id), None)
+    if not p or not p.get("sqrt") or not p.get("usd_per_quote"):
+        return None
+    return sqrt_to_price(p["sqrt"], p["token_is_c1"], dec_token, p["quote_decimals"]) * p["usd_per_quote"]
 
 
 def parse_mcap(text):

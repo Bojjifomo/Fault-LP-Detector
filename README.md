@@ -6,7 +6,10 @@ how much selling the pools can absorb, where the supports are, and which LP rang
 price.
 
 What it looks at:
-- **USDG pool focus**: prices and ranges come from the coin's deepest token/USDG pool (where you LP).
+- **USDG pool focus, market prices**: liquidity, fees and your position use the coin's deepest token/USDG pool (where
+  you LP). Prices come from the busiest pool converted to USD — the market price DexScreener shows — because a thin
+  USDG pool with a 4–8% fee only follows the market when the gap is bigger than its fee. Market cap leaves out burned
+  coins (0x…dead), like DexScreener. When your USDG pool's own price is 5%+ away from the market, the page says so.
 - **Pre-crash fingerprints**: the coin is compared with how the reference coins looked right before their crashes.
 - **Similar past moments**: every hour of history in the sample coins is matched on pattern, price action, whales,
   technicals and coin profile, and you see what happened in the next 8 hours.

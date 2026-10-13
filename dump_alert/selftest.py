@@ -294,10 +294,26 @@ def position_case():
     assert b["state"] == "below" and b["usdg"] == 0 and abs(b["value"] - 0.3 / 0.35 ** 0.5) < 1e-9
 
 
+def supply_case():
+    """Market cap seperti DexScreener: supply dikurangi koin di alamat burn (0x…dead) dan yang di-burn ke 0x0."""
+    from .holders import BURN
+    from .lp_check import circulating_supply
+    from .signals import ZERO
+
+    class Tk:
+        supply = 1000.0
+        ds = {"decimals": 0, "transfers": [[1, 1, "h", ZERO, "0xa", 1000], [2, 2, "h", "0xa", sorted(BURN)[0], 50],
+                                           [3, 3, "h", "0xa", ZERO, 10]]}
+    assert abs(circulating_supply(Tk) - 940.0) < 1e-9, circulating_supply(Tk)
+    Tk.ds = {"decimals": 0, "transfers": []}   # mint tidak lewat Transfer: pakai totalSupply
+    assert circulating_supply(Tk) == 1000.0
+
+
 def main():
     levels_case()
     ranges_case()
     position_case()
+    supply_case()
     # banyak key: key kuota habis dilewati, key yang kena batas per detik dipelankan lalu dipakai lagi
     assert parse_keys("k1, k2\nk3", ["k2", "https://robinhood-mainnet.g.alchemy.com/v2/k4"], None) == ["k1", "k2", "k3", "k4"]
     rpc = PacedRPC(["https://selftest.invalid/v2/SECRETKEYA", "https://selftest.invalid/v2/SECRETKEYB"])

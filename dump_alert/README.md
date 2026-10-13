@@ -179,10 +179,18 @@ price action, technicals & profil; kemiripan whale tetap ditampilkan sebagai kon
 
 ### Pool USDG
 
-Analisa memakai **pool token/USDG** terdalam (tempat LP dibuka). Riwayat sebelum pool USDG ada diambil
-dari pool utama (biasanya pool launch vs ETH) dan dikonversi ke USDG per sampel. Sampel dari pool yang
-sedang kosong (likuiditas 0, harganya bisa sampai 1e50) dibuang. Koin tanpa pool USDG aktif dapat
-peringatan; pool USDG dicari ulang tiap 6 jam.
+Likuiditas, fee, dan posisi memakai **pool token/USDG** terdalam (tempat LP dibuka). **Harga** = harga pasar: dari
+pool USDG itu kalau ramainya sebanding pool paling ramai, kalau tidak dari **pool paling ramai** (biasanya pool launch
+vs ETH) yang dikonversi ke USDG per sampel. Alasannya: pool USDG tipis dengan fee 4–8% baru di-arbitrase kalau
+selisihnya melewati fee-nya, jadi harganya tertinggal (contoh SURPLUS: pool USDG fee 8% tertahan di $735K saat pasar
+$666K). Halaman memberi peringatan kalau harga pool USDG-mu 5%+ beda dari pasar. **Market cap** = harga × (total supply
+− koin di alamat burn 0x…dead), sama seperti DexScreener. Riwayat sebelum pool sumber harga ada diambil dari pool
+utama. Sampel dari pool yang sedang kosong (likuiditas 0, harganya bisa sampai 1e50) dibuang. Koin tanpa pool USDG
+aktif dapat peringatan; pool USDG dicari ulang tiap 6 jam. Data lama (format market v2) dicari ulang pool-nya dan
+harganya disampel ulang kalau sumber harganya berubah.
+
+Catatan: riset di koin sampel (ranges.npz, reference.json) masih dibangun dari harga versi lama (81,7% riwayatnya dari
+pool USDG yang tipis); perlu ditarik ulang & dibangun ulang supaya memakai harga pasar.
 
 ### Support & likuiditas
 

@@ -654,10 +654,15 @@ def usdg_section(a):
            + ("; dollar values use today's ETH price" if a["usd"] else "") + '.</div>')
         return
     with st.expander(f"Pool used: USDG pool with a {main['fee'] / 1e4:g}% fee (${compact(u['depth'])} liquidity)"):
-        ui(f'<p class="hl-small">This is the biggest of {len(u["pools"])} USDG pools for this coin. All prices, market caps and '
-           'ranges on this page are in USD. Prices are almost the same in every pool, so the verdict counts for all of them; '
-           'only the fee and the size differ.'
-           + (f' Price history from before this pool existed comes from the {h(u["pre"])} pool, converted to USD.'
+        pp = u.get("price_pool")
+        ui(f'<p class="hl-small">This is the biggest of {len(u["pools"])} USDG pools for this coin: its size and fee are used '
+           'for liquidity and fees. All prices, market caps and ranges on this page are in USD. '
+           + (f'Prices come from the busiest pool ({h(pp["pair"])}, converted to USD) — the market price, the same one '
+              'DexScreener shows. A thin USDG pool with a high fee only follows the market when the gap gets bigger than its '
+              'fee, so its own price can lag. ' if pp else
+              'Prices are almost the same in every pool, so the verdict counts for all of them; only the fee and the size '
+              'differ.')
+           + (f' Price history from before the price pool existed comes from the {h(u["pre"])} pool, converted to USD.'
               if u["since_block"] and u["pre"] else "") + '</p>')
         if len(u["pools"]) > 1:
             total = sum(p["swaps"] for p in u["pools"]) or 1
@@ -671,6 +676,14 @@ SINGLE, TWO = "Single-sided USDG (0% to −X%)", "Two-sided (USDG + coin)"
 
 def is_single(a):
     return bool(a.get("single_sided"))
+
+
+def pool_gap(a):
+    """Your USDG pool's price vs the market price (None if unknown or the pool is the price source)."""
+    u = a.get("usdg") or {}
+    if not u.get("pool_px") or not u.get("price_pool") or not a["now"]["px"]:
+        return None
+    return u["pool_px"] / a["now"]["px"] - 1
 
 
 def plan_label(a):
@@ -853,6 +866,11 @@ def position_section(a):
            '8.38K).</div>')
     cls, title, txt = position_answer(a, o)
     ui(f'<div class="hl-card hl-verdict {cls}"><div class="t">{title}</div><div class="s">{txt}</div></div>')
+    gap = pool_gap(a)
+    if gap is not None and abs(gap) >= 0.03:
+        ui(f'<p class="hl-small">Prices here are market prices. Your USDG pool is {abs(gap) * 100:.0f}% '
+           f'{"above" if gap > 0 else "below"} the market right now, and your LP follows the pool\'s price, so it can reach '
+           'these levels a bit earlier or later.</p>')
     # price ladder: top -> bottom, at most one row per idea
     rows = []
     if o["state"] != "above":
@@ -1922,10 +1940,26 @@ def render(a):
     main = u.get("main")
     liq = (("USDG pool size", f"${compact(u['depth'])}", "", f"fee {main['fee'] / 1e4:g}% · coin age {f['age_h'] / 24:.1f} days")
            if main else ("Pool size", f"{compact(f['eth_res'])} {a['quote']}", "", f"coin age {f['age_h'] / 24:.1f} days"))
-    tiles([("Market cap", money(fdv, usd, qu), "", None),
+    gap = pool_gap(a)
+    sub = []
+    if gap is not None and abs(gap) >= 0.03:
+        sub.append(f"your USDG pool: {money(u['pool_px'] * a['supply'], 1.0, qu)} ({gap * 100:+.0f}%)")
+    if a.get("burned", 0) >= 0.005 * a.get("supply_total", a["supply"]):
+        sub.append(f"{a['burned'] / a['supply_total'] * 100:.1f}% of coins burned (not counted)")
+    tiles([("Market cap", money(fdv, usd, qu), "", " · ".join(sub) or None),
            ("From all-time high", pct(off), sign_class(off), f"ATH {money(f['ath'] * a['supply'], usd, qu)}"),
            ("Last 4 hours", pct(f["r4h"]), sign_class(f["r4h"]), None), liq])
     ui(f'<div class="hl-meta">{h(a["name"])} ({h(a["symbol"])}) · {h(a["address"])} · data up to {when(f["t"])} UTC</div>')
+    if gap is not None and abs(gap) >= 0.05:
+        fee = u["main"]["fee"] / 1e4
+        ui(f'<div class="hl-alert warn">⚠️ <b>Your USDG pool\'s price is {abs(gap) * 100:.0f}% {"above" if gap > 0 else "below"} '
+           f'the market</b> ({money(u["pool_px"] * a["supply"], 1.0, qu)} vs {money(fdv, usd, qu)}). The pool is thin with a '
+           f'{fee:g}% fee, so traders only bring it back in line when the gap is bigger than the fee. Your LP follows this '
+           'pool\'s price, not the market\'s. '
+           + ('When it catches up, traders sell coins into your pool, so a single-sided USDG position there buys them above '
+              'the market price (you do earn the fee on it). ' if gap > 0 else
+              'When it catches up, traders buy coins from your pool below the market price. ')
+           + 'Everything else on this page uses the market price (like DexScreener).</div>')
     usdg_section(a)
     risk_section(a)
     reasons_section(a)

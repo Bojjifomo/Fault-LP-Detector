@@ -43,11 +43,15 @@ TRANSFER_WORKERS = 8   # per key
 H = 3600
 ADDR_CACHE = os.path.join(DATA_DIR, "_addresses.json")  # kontrak vs wallet, dipakai bersama semua token
 
-# Analisa difokuskan ke pool token/USDG (tempat LP dibuka): harga dibaca dari pool USDG paling ramai
-# dalam USD; riwayat sebelum pool USDG ada diambil dari pool utama yang dikonversi ke USDG per sampel.
+# Analisa difokuskan ke pool token/USDG (tempat LP dibuka): likuiditas, fee, dan posisi dari pool USDG terdalam.
+# Harga = harga pasar dalam USD: dari pool USDG itu kalau ramainya sebanding pool paling ramai; kalau tidak (pool USDG
+# tipis / fee tinggi: baru di-arbitrase saat selisihnya melewati fee, jadi harganya tertinggal dari pasar), dari pool
+# paling ramai yang dikonversi ke USDG per sampel. Riwayat sebelum pool sumber ada diambil dari pool utama.
 USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
 ETH_USDG = (ZERO, USDG, 100, 1, ZERO)  # pool ETH/USDG yang paling sering dilalui rute swap (cadangan konversi)
-MARKET_VERSION = 2       # versi format market; data versi lama dicari ulang poolnya & harganya disampel ulang
+MARKET_VERSION = 3       # versi format market; data versi lama dicari ulang poolnya (harga disampel ulang kalau
+                         # sumber harganya berubah)
+PRICE_POOL_RATIO = 3     # pool lain dipakai sebagai sumber harga kalau swap-nya >= 3x pool USDG terdalam
 USDG_GRACE = 3600        # pool USDG baru dipakai 1 jam sesudah dibuat (harga awal sering belum di-arbitrase)
 USDG_RECHECK = 6 * 3600  # koin tanpa pool USDG dicek ulang (pool USDG sering dibuat belakangan)
 BOOK_MAX_DROP = 0.95     # peta likuiditas LP dibaca dari harga sekarang sampai -95%
@@ -525,9 +529,17 @@ class Fetcher:
         m = self.ds.get("market")
         if m and m.get("kind") == "v4":
             if m.get("v") != MARKET_VERSION:
-                self.log("old data format: looking up pools again (USDG focus) and re-sampling prices")
-                m = self.ds["market"] = None
-                self.ds["prices"] = []
+                self.log("old data format: looking up pools again")
+                self.discover_market()
+                new = self.ds["market"]
+                same = new and m.get("v") == 2 and new.get("pool_id") == m.get("pool_id") and \
+                    (new.get("pre") or {}).get("pool_id") == (m.get("pre") or {}).get("pool_id")
+                if same:  # sumber harga sama: harga lama tetap dipakai
+                    new["usdg_from_block"] = m.get("usdg_from_block")
+                else:
+                    self.log("price source changed: re-sampling prices")
+                    self.ds["prices"] = []
+                return
             elif "pools" not in m:  # data sebelum ada peta likuiditas: lengkapi daftar pool
                 self.discover_market()
                 new = self.ds["market"]
@@ -616,9 +628,12 @@ class Fetcher:
         if not market:
             self.log("market: no Uniswap pool found; price signals disabled")
         elif market.get("usdg_pools"):
-            n = len(market["usdg_pools"])
-            self.log(f"market: USDG pool {market['pool_id'][:10]}… fee {market['fee'] / 1e4:g}%"
-                     + (f" (deepest of {n} USDG pools)" if n > 1 else ""))
+            n, lp = len(market["usdg_pools"]), market["lp_pool"]
+            self.log(f"market: USDG pool {lp['pool_id'][:10]}… fee {lp['fee'] / 1e4:g}%"
+                     + (f" (deepest of {n} USDG pools)" if n > 1 else "")
+                     + ("" if market["pool_id"] == lp["pool_id"] else
+                        f"; prices from the busiest pool {market['pool_id'][:10]}… "
+                        f"({market.get('pair_symbol') or market['quote_symbol']}, in USD)"))
         else:
             pair = market.get("pair_symbol") or market["quote_symbol"]
             self.log(f"market: no active USDG pool; using the main pool {market.get('pool_id') or market.get('pool')} "
@@ -675,8 +690,15 @@ class Fetcher:
                              "tick_spacing": cands[p][3], "hooks": cands[p][4], "swaps": freq[p]}
                             for p in sorted(cands, key=lambda p: -freq[p]) if freq[p] or p == best]}
         if usdg:
-            market.update(self._source(usdg[0], cands[usdg[0]], keys, freq, USDG), usd=True, usdg_from_block=None)
-            market["pre"] = None if best == usdg[0] else self._source(best, cands[best], keys, freq, USDG)
+            # sumber harga: pool USDG terdalam, kecuali ada pool yang jauh lebih ramai (harga pasar)
+            active = max(cands, key=lambda p: (freq[p], freq_hist[p], USDG in cands[p][:2]))
+            src_pool = usdg[0] if freq[usdg[0]] * PRICE_POOL_RATIO >= freq[active] else active
+            src = self._source(src_pool, cands[src_pool], keys, freq, USDG)
+            if src is None:
+                src_pool, src = usdg[0], self._source(usdg[0], cands[usdg[0]], keys, freq, USDG)
+            market.update(src, usd=True, usdg_from_block=None,
+                          lp_pool={"pool_id": usdg[0], "fee": cands[usdg[0]][2], "hooks": cands[usdg[0]][4]})
+            market["pre"] = None if best == src_pool else self._source(best, cands[best], keys, freq, USDG)
         else:
             market.update(self._source(best, cands[best], keys, freq, ZERO), usd=False, pre=None)
         return market

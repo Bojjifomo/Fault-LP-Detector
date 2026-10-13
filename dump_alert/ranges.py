@@ -401,8 +401,9 @@ def fee_yield(tok, m, t, usd, position_usd):
             if j >= 0:
                 vol += v * pv[j]
     vol *= usd or 0.0
-    total, pool = sum(tv.values()), tv.get(m.get("pool_id"))
-    fee, notes, assumed = m.get("fee"), [], False
+    lp = m.get("lp_pool") or m   # pool USDG tempat LP (bisa beda dari pool sumber harga)
+    total, pool = sum(tv.values()), tv.get(lp.get("pool_id"))
+    fee, notes, assumed = lp.get("fee"), [], False
     rate = None if fee is None or fee & DYNAMIC_FEE else fee / 1e6
     if rate == 0:
         notes.append("this pool pays LPs no swap fee (the hook takes it)")
