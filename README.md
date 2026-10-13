@@ -18,7 +18,10 @@ What it looks at:
 - **Best LP range**: researched by opening 133 different ranges at every past hour of the sample coins and
   scoring price impact plus fees (real volume × this pool's live fee level, diluted by your position size). It
   recommends the range that grew money most in similar moments — or tells you to skip when none came out ahead.
-- **A conclusion under every analysis**, and a summary box under the verdict.
+- **Top holders & money flow**: the 10 biggest wallets (share, average buy price, profit multiple, last move) and the
+  buys/sells of the last 1/4/24 hours, plus how far the price usually moves while you sleep.
+- **One clear answer at the top** (open / risky / don't open / low risk but fees too low) in plain English, results in
+  dollars for your position size, and a conclusion under every analysis.
 
 ## Run it
 

@@ -33,32 +33,36 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
 
 ### Yang ditampilkan (urut dari atas)
 
-1. **Verdict** (OK / CAUTION / AVOID) dan sarannya, lalu **ringkasan**: peluang dump, range terbaik,
-   support pertama, dan risiko whale dalam satu kotak.
-2. Market cap, jarak dari ATH, 4 jam terakhir, likuiditas pool USDG, dan pool USDG yang dipakai.
-3. **Dump risk estimate**: tiga sudut pandang — peluang dari model, hasil situasi mirip, dan seberapa
-   sering dump benar-benar terjadi setelah vonis yang sama saat diuji.
-4. **Why this verdict?** dengan faktor utama dari model dalam kalimat biasa.
-5. **Liquidity & support**: tekanan jual (dan beli) yang dibutuhkan untuk menggerakkan harga, **profil
-   likuiditas vertikal** ala VPVR (likuiditas LP per pita 2% di bawah & di atas harga, di samping volume
-   yang ditransaksikan di tiap harga 7 hari terakhir, plus zona support dan range terbaik), tabel zona
-   support, lubang likuiditas, dampak jual wallet terbesar.
-6. **Best LP range from the current price**: range hasil riset (bagian 4), tingkat fee pool sekarang,
-   batas bawah & atas (harga dan market cap), hasil rata-rata / kasus buruk / peluang rugi >20%, tabel
-   pembanding (range terbaik, range dua sisi terbaik, full range, range rencanamu), dan peta range.
-7. **Similar past moments**: momen paling mirip di 24 koin sampel dan apa yang terjadi 8 jam sesudahnya.
-8. **Compared with crashes in the reference coins**: tanda-tanda di puncak tepat sebelum crash.
-9. **Technical view**: tren EMA, RSI, VWAP, Bollinger, volume, tekanan beli, holder yang sudah profit
-   besar, sisa supply wallet jam pertama, perubahan likuiditas, pembeli baru — tiap item diberi label
-   *useful signal* atau *context only* sesuai hasil uji.
-10. Grafik 72 jam, simulasi nilai LP kalau ditinggal tidur, perintah alarm, dan rincian filter.
+1. **Kotak keputusan** paling atas: satu jawaban jelas (✅ OK to open / ✅ risiko crash rendah tapi fee terlalu
+   kecil / ⚠️ Risky / 🚫 Don't open), 4 poin alasan dalam bahasa sederhana (risiko crash, range terbaik dalam
+   dolar, holder besar, arus uang 4 jam), dan **What to do**. Kalau model bilang risiko rendah tapi situasi mirip
+   banyak yang crash, ada peringatan untuk memakai jumlah lebih kecil.
+2. Market cap, jarak dari ATH, 4 jam terakhir, ukuran pool USDG.
+3. **How likely is a crash while you sleep?**: peluang dari model, hasil 30 situasi paling mirip, dan seberapa
+   sering crash terjadi setelah vonis yang sama saat diuji.
+4. **What pushes the risk up or down?**: tanda bahaya, faktor yang menaikkan risiko, dan yang menurunkannya.
+5. **How far can the price move while you sleep?** (baru): turun & naik terjauh selama jam tidur untuk separuh /
+   8 dari 10 / 9 dari 10 malam, dari riwayat koin itu dan koin sampel dengan vonis sama.
+6. **Who holds the coin?** (baru): 10 wallet terbesar (bukan pool/kontrak): porsi supply, market cap saat mereka
+   beli (harga beli rata-rata), untung berapa kali, gerakan terakhir, perubahan 24 jam.
+7. **Is money coming in or going out?** (baru): beli, jual, bersih, jumlah pembeli/penjual, transaksi terbesar,
+   dan beli/jual bersih wallet besar untuk 1 / 4 / 24 jam terakhir.
+8. **Liquidity and price floors**: profil likuiditas vertikal ala VPVR, zona support, dampak jual wallet terbesar.
+9. **Which LP range should you open?**: range hasil riset (bagian 4) dengan hasil **dalam dolar** untuk ukuran
+   posisimu (rata-rata, malam buruk 1 dari 10, fee), tabel pembanding, dan peta range.
+10. **What happened after similar moments?**, **Does it look like a coin right before a crash?** (sekarang
+    menyebut tanda yang masih kurang), **Chart and on-chain indicators**.
+11. Grafik 72 jam, **If you sleep** (nilai posisimu dalam dolar kalau harga turun 30% / 50%), alarm, rincian filter.
+
+Bahasa tampilan dibuat sederhana: kalimat pendek tanpa istilah teknis, angka hasil dalam dolar, dan penjelasan
+metode dipindah ke bagian lipat **How is this calculated?**.
 
 Tiap analisa ditutup dengan **Conclusion** (kesimpulan satu-dua kalimat dari datanya, warnanya mengikuti
 tingkat risikonya).
 
 **Position size (USD)** (di form): dipakai untuk menghitung porsi fee-mu; posisi besar di pool tipis
 mendapat fee lebih kecil per dolar karena likuiditasmu sendiri ikut membagi fee.
-**Conservative mode** (toggle di form): vonis = yang paling berat dari aturan & model.
+**Extra careful mode** (toggle di form, dulu *Conservative mode*): vonis = yang paling berat dari aturan & model.
 **Rewind to a past time** (opsional): nilai koin seolah kamu mengecek pada jam itu.
 
 Lama pengecekan: koin yang pertama kali dicek ±1–5 menit; cek berikutnya untuk koin yang sama cuma

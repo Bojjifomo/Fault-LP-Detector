@@ -45,10 +45,9 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from dump_alert import ranges as rg  # noqa: E402
-from dump_alert.analogs import GROUP_LABEL  # noqa: E402
 from dump_alert.fetch import Fetcher, QuotaError, data_path, eth_usd, make_rpc, parse_keys  # noqa: E402
 from dump_alert.levels import ZONE  # noqa: E402
-from dump_alert.lp_check import (ANALOG_GROUPS, SIGNS, STEP, VERDICTS, assess, load_reference,  # noqa: E402
+from dump_alert.lp_check import (SIGNS, STEP, VERDICTS, assess, load_reference,  # noqa: E402
                                  lp_value, parse_time, pct, truncate)
 from dump_alert.patterns import STATES  # noqa: E402
 from dump_alert.signals import Token  # noqa: E402
@@ -63,12 +62,10 @@ TEXT, MUTED, ACCENT, MINT = "#F6FEFD", "#8D9B99", "#50D2C1", "#97FCE4"
 STATUS = {"OK": "#1F9E78", "CAUTION": "#C2831F", "AVOID": "#D9576F"}
 STATUS_TEXT = {0: "#50D2C1", 1: "#F2B84B", 2: "#ED7088"}
 LEVEL_CLASS = {0: "good", 1: "warn", 2: "bad"}
-TITLE = {0: "OK · fine to open an LP", 1: "CAUTION · high risk", 2: "AVOID · don't open an LP now"}
-ICON = {0: "✅", 1: "⚠️", 2: "🚫"}
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-SHORT = {"pump": "Ran up ≥20% (4h)", "lipat": "≥1.8x its 24h low", "pucuk": "≤10% below the 24h high",
-         "retest": "ATH retest pattern", "borong": "Whales bought ≥0.9% (6h)", "jual": "Whales sold ≥1.5% (6h)",
-         "baru": "New big wallets ≥1.5% (2h)", "ath4j": "New 4h-chart ATH"}
+SHORT = {"pump": "Up 20%+ in 4 hours", "lipat": "1.8x+ its 24h low", "pucuk": "Within 10% of its 24h high",
+         "retest": "Back at its old high (retest)", "borong": "Big holders bought 0.9%+ (6h)",
+         "jual": "Big holders sold 1.5%+ (6h)", "baru": "New big wallets 1.5%+ (2h)", "ath4j": "New high on the 4h chart"}
 
 CSS = f"""
 <style>
@@ -190,6 +187,12 @@ table.hl .yes {{ color:var(--good-t); }} table.hl .no {{ color:var(--muted); }}
 [data-testid="stNumberInputStepDown"], [data-testid="stNumberInputStepUp"] {{ background:var(--panel2) !important;
         color:var(--muted) !important; border:none !important; }}
 [data-testid="stNumberInputStepDown"]:hover, [data-testid="stNumberInputStepUp"]:hover {{ color:var(--accent) !important; }}
+.hl-verdict.info {{ border-left-color:var(--accent); background:linear-gradient(90deg, rgba(80,210,193,.14), var(--panel) 65%); }}
+.hl-verdict.info .t {{ color:var(--mint); }}
+.hl-dec {{ margin:8px 0 10px; padding-left:18px; }}
+.hl-dec li {{ margin:4px 0; font-size:14px; color:var(--text); line-height:1.5; }}
+.hl-dec li b {{ color:var(--text); }}
+.hl-verdict .s b {{ color:var(--text); }}
 .hl-conc {{ background:var(--panel2); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px;
         padding:10px 14px; margin:12px 0 4px; font-size:14px; color:var(--text); line-height:1.5; }}
 .hl-conc .lab {{ display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent);
@@ -350,7 +353,7 @@ def chart(a):
     nearest = alt.selection_point(nearest=True, on="pointerover", fields=["time"], empty=False)
     tip = [alt.Tooltip("time:T", title="Time (UTC)", format="%d %b %H:%M"),
            alt.Tooltip("mcap:Q", title=f"Market cap ({unit})", format=",.0f"),
-           alt.Tooltip("whale6h:Q", title="Whales, 6h: + sold / − bought (% of supply)", format="+.2f"),
+           alt.Tooltip("whale6h:Q", title="Big holders, 6h: + sold / − bought (% of all coins)", format="+.2f"),
            alt.Tooltip("verdict:N", title="Verdict")]
     base = alt.Chart(df).encode(x=x)
     line = base.mark_line(strokeWidth=2, color=ACCENT).encode(
@@ -377,10 +380,10 @@ def chart(a):
     price = alt.layer(*layers).properties(height=260, width=CHART_W)
     whale = alt.layer(
         base.mark_line(strokeWidth=2, color=ACCENT).encode(
-            y=alt.Y("whale6h:Q", title="Whales sold(+)/bought(−) %",
+            y=alt.Y("whale6h:Q", title="Big holders sold(+)/bought(−) %",
                     scale=alt.Scale(domain=[max(df["whale6h"].min(), -5), max(df["whale6h"].max(), 2)], clamp=True))),
         alt.Chart(pd.DataFrame({"y": [1.5]})).mark_rule(color=STATUS["AVOID"], strokeDash=[4, 4]).encode(y="y:Q"),
-        alt.Chart(pd.DataFrame({"y": [1.5], "label": ["danger line: whales sold 1.5%"]})).mark_text(
+        alt.Chart(pd.DataFrame({"y": [1.5], "label": ["danger line: big holders sold 1.5%"]})).mark_text(
             align="left", dx=4, dy=-6, color=MUTED, fontSize=11).encode(y="y:Q", text="label:N", x=alt.value(0)),
     ).properties(height=110, width=CHART_W)
     strip = alt.Chart(df).mark_rect().encode(
@@ -525,6 +528,39 @@ def range_map(rec):
 
 # ---------------------------------------------------------------- sections
 
+def usd_of(v):
+    """Signed dollar amount, e.g. +$12 / -$9.40."""
+    s = "-" if v < 0 else "+"
+    v = abs(v)
+    return f"{s}${compact(v)}" if v >= 1000 else f"{s}${v:,.2f}" if v < 10 else f"{s}${v:,.0f}"
+
+
+def dollars(v):
+    return f"${v:,.0f}"
+
+
+def lost_or_made(v):
+    """'lost $53' for a loss, 'made +$4' for a gain (no double minus)."""
+    return f"lost {dollars(-v)}" if v < 0 else f"made {usd_of(v)}"
+
+
+def flow_side(w):
+    r = w["buy"] / (w["buy"] + w["sell"]) if w["buy"] + w["sell"] else 0.5
+    return "mostly buying" if r >= 0.6 else "mostly selling" if r <= 0.4 else "about even"
+
+
+def of_them(n, verb_one, verb_many):
+    return "none of them " + verb_many if n == 0 else f"1 of them {verb_one}" if n == 1 else f"{n} of them {verb_many}"
+
+
+def risk_word(p):
+    return "low" if p < 0.15 else "medium" if p < 0.35 else "high"
+
+
+def how(title="How is this calculated?"):
+    return st.expander(title)
+
+
 def usdg_section(a):
     """Which USDG pool the analysis uses (where you LP), or a warning if there is none."""
     u = a["usdg"]
@@ -532,93 +568,126 @@ def usdg_section(a):
         return
     main = u["main"]
     if not main:
-        ui(f'<div class="hl-alert warn">⚠️ <b>This coin has no active USDG pool yet.</b> Only a pool against '
-           f'{h(a["market"].get("pair_symbol") or a["quote"])} was found, so the analysis uses that pool'
-           + ("; USD values use today's ETH price" if a["usd"] else "") + '.</div>')
+        ui(f'<div class="hl-alert warn">⚠️ <b>This coin has no active USDG pool yet.</b> We used its '
+           f'{h(a["market"].get("pair_symbol") or a["quote"])} pool instead'
+           + ("; dollar values use today's ETH price" if a["usd"] else "") + '.</div>')
         return
-    since = ""
-    if u["since_block"] and u["pre"]:
-        since = (f' Price history from before this pool existed comes from the {h(u["pre"])} pool, converted to USDG, '
-                 'so the ATH and older patterns still count.')
-    ui(f'<div class="hl-note">Judged on the <b>USDG pool with a {main["fee"] / 1e4:g}% fee</b> (the deepest'
-       + (f' of {len(u["pools"])} USDG pools' if len(u["pools"]) > 1 else "")
-       + f'), active liquidity ≈ ${compact(u["depth"])}. Prices, market cap and ranges are in USD.{since}</div>')
-    if len(u["pools"]) > 1:
-        with st.expander(f"All USDG pools ({len(u['pools'])})"):
+    with st.expander(f"Pool used: USDG pool with a {main['fee'] / 1e4:g}% fee (${compact(u['depth'])} liquidity)"):
+        ui(f'<p class="hl-small">This is the biggest of {len(u["pools"])} USDG pools for this coin. All prices, market caps and '
+           'ranges on this page are in USD. Prices are almost the same in every pool, so the verdict counts for all of them; '
+           'only the fee and the size differ.'
+           + (f' Price history from before this pool existed comes from the {h(u["pre"])} pool, converted to USD.'
+              if u["since_block"] and u["pre"] else "") + '</p>')
+        if len(u["pools"]) > 1:
             total = sum(p["swaps"] for p in u["pools"]) or 1
             rows = [[("✓ " if p is main else "") + f"{p['pool_id'][:10]}…{p['pool_id'][-4:]}", f"{p['fee'] / 1e4:g}%",
                      f"{p['swaps'] / total * 100:.0f}%", f"${compact(2 * p['usdg_side'])}"] for p in u["pools"]]
-            table(["Pool (ID)", "Fee", "Share of swaps", "Active liquidity"], rows)
-            ui('<p class="hl-small">Share of swaps comes from a sample of recent transactions. Active liquidity = the '
-               'liquidity around the current price, expressed as a full-range equivalent. Prices across USDG pools stay '
-               'almost equal (arbitrage), so the verdict applies to all of them; what differs is the fee and depth.</p>')
+            table(["Pool", "Fee", "Share of trades", "Liquidity"], rows)
 
 
-def summary_section(a):
-    """The conclusions of the main analyses in one box, right under the verdict."""
-    cells = []
-    p, hours = a["model_p"], f"{a['sleep_h']:g}h"
+def decision_card(a):
+    """One clear answer at the top: should I open an LP now, and how?"""
+    lvl, rec, p, q = a["level"], a.get("best_range"), a["model_p"], a.get("analogs")
+    hours, pos = f"{a['sleep_h']:g} hours", a["position_usd"]
+    best = rec["best"] if rec else None
+    if lvl == 2:
+        cls, title, todo = "bad", "🚫 Don't open an LP now", "Wait and check again later. The chance of a big drop is high."
+    elif lvl == 1:
+        cls, title = "warn", "⚠️ Risky — only small, and keep the alarm on"
+        if rec and rec["skip"]:
+            todo = "Better wait: the crash risk is higher than usual and the fees don't pay for it."
+        else:
+            todo = ("If you still open: use a small amount" + (f", the range <b>{h(best['label'])}</b>" if best else "")
+                    + " and keep the alarm on.")
+    elif rec and rec["skip"]:
+        cls, title = "info", "✅ Low crash risk — but fees are too low to be worth it now"
+        todo = (f"Better wait until more people trade this coin (more fees). If you open anyway, use <b>{h(best['label'])}</b>"
+                + (f": you start with {best['usdg'] * 100:.0f}% in USDG, so a drop hurts much less." if best["usdg"] >= 0.7 else "."))
+    else:
+        cls, title = "good", "✅ OK to open an LP"
+        todo = (f"Open <b>{h(best['label'])}</b> and keep the alarm on." if best else "Keep the alarm on while the position is open.")
+    lines = []
+    doubt = p is not None and q and q["p30"] >= max(0.2, p + 0.1)
+    if doubt and lvl < 2:
+        todo += " Similar past moments crashed more often than the model says, so use a smaller amount than usual."
     if p is not None:
-        cells.append(("Dump risk", f"<b>{p * 100:.0f}%</b> chance of a ≥30% drop within {hours}"
-                      + (f" · {a['analogs']['n30']} of {a['analogs']['n']} similar moments dumped" if a.get("analogs") else "")))
-    rec = a.get("best_range")
-    if rec:
-        b = rec["best"]
-        cells.append(("Best range", f"<b>skip</b> — no range came out ahead at today's fee level ({rec['fee']['r'] * 100:.2f}%/day)"
-                      if rec["skip"] else f"<b>{h(b['label'])}</b> · average {pct1(b['mean'])}, bad case {pct1(b['p10'])} over {hours}"))
-    lv = a.get("levels") or {}
-    firm = [z for z in lv.get("zones", []) if z["strength"] in ("strong", "medium") and z["drop"] >= -0.5]
-    if firm:
-        cells.append(("First support", f"<b>{pct(firm[0]['drop'])}</b> ({firm[0]['strength']}, {firm[0]['touches']} bounce{'' if firm[0]['touches'] == 1 else 's'})"))
-    w = lv.get("whale")
-    if w and w["drop1"] is not None:
-        cells.append(("Whale risk", f"largest wallet selling all → <b>{pct(-w['drop1'])}</b>"))
-    if cells:
-        ui('<div class="hl-card"><div class="hl-kv" style="margin:0">' + "".join(
-            f'<div class="k">{k}</div><div class="v">{v}</div>' for k, v in cells) + "</div></div>")
+        txt = f"<b>Crash risk: {risk_word(p)}.</b> Our model gives a {p * 100:.0f}% chance that the price falls 30% or more in the next {hours}."
+        if doubt:
+            txt += (f" But {q['n30']} of the {q['n']} most similar past moments did crash, so the real risk may be higher.")
+        lines.append(txt)
+    if best:
+        b = best
+        if rec["skip"]:
+            lines.append(f"<b>Fees vs risk: not worth it.</b> This pool pays LPs about {rec['fee']['r'] * 100:.2f}% a day. In similar "
+                         "past moments, the losing nights outweighed the fees for every range.")
+        elif lvl == 2:
+            lines.append(f"<b>Range:</b> if you open anyway, {h(b['label'])} did best in similar moments, but it "
+                         f"{lost_or_made(b['p10'] * pos)} of {dollars(pos)} on a bad night (1 in 10).")
+        else:
+            lines.append(f"<b>Best range: {h(b['label'])}.</b> With {dollars(pos)}: about {usd_of(b['mean'] * pos)} on average over "
+                         f"{hours} (fees {usd_of(b['fees'] * pos)}). On a bad night (1 in 10): {usd_of(b['p10'] * pos)}.")
+    hs = a.get("holder_summary")
+    if hs:
+        lines.append(f"<b>Big holders:</b> the 10 biggest wallets hold {hs['share'] * 100:.0f}% of all coins; "
+                     + of_them(hs["big_profit"], "is up 3x or more", "are up 3x or more")
+                     + (f", and {len(hs['sold24'])} sold in the last 24 hours." if hs["sold24"] else "."))
+    fl = {w["hours"]: w for w in a.get("flow") or []}
+    if 4 in fl:
+        w = fl[4]
+        k = a["usd"] or 1
+        lines.append(f"<b>Money flow (last 4 hours):</b> {flow_side(w)} ({usd_of(w['net'] * k)} net).")
+    ui(f'<div class="hl-card hl-verdict {cls}"><div class="t">{title}</div>'
+       '<ul class="hl-dec">' + "".join(f"<li>{x}</li>" for x in lines) + "</ul>"
+       f'<div class="s"><b>What to do:</b> {todo}</div></div>')
 
 
 def risk_section(a):
-    """Three independent estimates of the dump risk while you sleep."""
+    """How likely a crash is while you sleep, from three angles."""
     cal, q, p = a["calib"], a["analogs"], a["model_p"]
     if cal is None and q is None and p is None:
         return
-    hours = f"{a['sleep_h']:g}h"
-    section("Dump risk estimate", f"Chance of a ≥30% price drop within the next {hours}, from three independent angles.")
+    hours = f"{a['sleep_h']:g} hours"
+    section("How likely is a crash while you sleep?", f"A crash here means the price falls 30% or more within {hours}.")
     items = []
     if p is not None:
-        m = a["model"] or {}
-        bin_ = next((b for b in m.get("calibration", []) if b["lo"] <= p < b["hi"]), None)
-        note = (f"when it said {b_lo(bin_)}–{b_hi(bin_)}% in testing, dumps happened {bin_['rate'] * 100:.0f}% of the time"
-                if bin_ and bin_["rate"] is not None and bin_["n"] >= 30 else "calibration not available")
-        items.append(("Model", f"{p * 100:.0f}%", "neg" if p >= 0.35 else "warn-t" if p >= 0.15 else "pos", note))
+        items.append(("Our model", f"{p * 100:.0f}%", "neg" if p >= 0.35 else "warn-t" if p >= 0.15 else "pos",
+                      f"{risk_word(p)} (under 15% = low, over 35% = high)"))
     if q is not None:
         items.append(("Similar past moments", f"{q['n30']} of {q['n']}", "neg" if q["p30"] >= 0.35 else
-                      "warn-t" if q["p30"] >= 0.15 else "pos", f"dumped ≥30% within 8h ({q['p30'] * 100:.0f}% weighted)"))
+                      "warn-t" if q["p30"] >= 0.15 else "pos", "crashed within 8 hours"))
     vt = ((a["model"] or {}).get("verdict_test") or {}).get(a["mode"])
     if vt and vt[a["level"]]["p30"] is not None:
         r = vt[a["level"]]["p30"]
-        items.append((f"When the tool said {a['verdict']}", f"{r * 100:.0f}%", "neg" if r >= 0.35 else "warn-t" if r >= 0.15
-                      else "pos", f"a ≥30% drop followed within {a['sleep_h']:g}h (tested on the sample coins)"))
-    elif cal is not None:
-        items.append((f"Past {a['verdict']} verdicts", f"{cal['p30'] * 100:.0f}%", "neg" if cal["p30"] >= 0.35 else
-                      "warn-t" if cal["p30"] >= 0.2 else "pos", f"dumped ≥30% within {cal['sleep_h']:g}h ({cal['n_tokens']} coins)"))
+        items.append((f"Past '{a['verdict']}' verdicts", f"{r * 100:.0f}%", "neg" if r >= 0.35 else "warn-t" if r >= 0.15
+                      else "pos", "were followed by a crash (tested on the sample coins)"))
     tiles(items, "two" if len(items) == 2 else "")
-    ui('<p class="hl-small"><b>Model</b> = a statistical model trained on the sample coins (price action, whales, holder '
-       'profit, activity, coin age, liquidity). It drives the verdict: under 15% → OK, 15–35% → CAUTION, 35%+ → AVOID, and '
-       'a hard danger sign from the rules always means at least CAUTION. <b>Similar past moments</b> = the closest matching '
-       'hours in the sample coins and what happened next. The last tile shows how often a dump really followed this '
-       'verdict when the tool was tested on coins it had not seen.</p>')
+    with how():
+        m = a["model"] or {}
+        bin_ = next((b for b in m.get("calibration", []) if p is not None and b["lo"] <= p < b["hi"]), None)
+        ui('<ul class="hl-list">'
+           '<li class="info"><b>Our model</b> looks at price action, big holders, holder profits, trading activity, coin age '
+           'and liquidity, and learned from 24 sample coins what usually comes before a crash.'
+           + (f' When it said {b_lo(bin_)}–{b_hi(bin_)}% in tests, a crash really followed {bin_["rate"] * 100:.0f}% of the time.'
+              if bin_ and bin_["rate"] is not None and bin_["n"] >= 30 else "") + '</li>'
+           '<li class="info"><b>Similar past moments</b>: we searched every past hour of the sample coins for the 30 moments '
+           'that look most like right now, and counted how many crashed in the next 8 hours.</li>'
+           f'<li class="info"><b>Past verdicts</b>: how often a crash followed when this tool said {h(a["verdict"])} on coins '
+           'it had not seen before.</li>'
+           '<li class="info">The verdict uses the model: under 15% → OK, 15–35% → CAUTION, over 35% → AVOID. A strong danger '
+           'sign always makes it at least CAUTION.</li></ul>')
     if p is not None:
         band = 0 if p < 0.15 else 1 if p < 0.35 else 2
-        word = ("Low", "Elevated", "High")[band]
-        txt = f"<b>{word} dump risk</b>: the model puts a ≥30% drop within {hours} at {p * 100:.0f}%"
+        txt = f"<b>Crash risk is {risk_word(p)}</b> ({p * 100:.0f}%)."
         if q is not None:
             qb = 0 if q["p30"] < 0.15 else 1 if q["p30"] < 0.35 else 2
-            txt += (f", and {q['n30']} of {q['n']} similar past moments dumped. "
-                    + ("Both angles agree." if qb == band else "The two angles disagree, so treat the number as uncertain."))
-        else:
-            txt += "."
+            if qb > band:
+                txt += (f" But {q['n30']} of the 30 most similar past moments did crash, so the real risk may be higher than "
+                        "the model says. Use a smaller amount.")
+                band = max(band, 1)
+            elif qb < band:
+                txt += f" Similar past moments look calmer ({q['n30']} of 30 crashed)."
+            else:
+                txt += " Similar past moments agree."
         conclude(txt, LEVEL_CLASS[band])
 
 
@@ -631,82 +700,194 @@ def b_hi(b):
 
 
 def reasons_section(a):
-    section("Why this verdict?")
-    items = [("bad", f"❌ {r}") for r in a["reasons"]] + [("warn", f"⚠️ {r}") for r in a["minor_reasons"]]
-    if not items:
-        items = [("good", "✅ None of the danger signs are active right now.")]
-    bullets(items)
-    if a["minor_reasons"]:
-        ui('<p class="hl-small">⚠️ = minor warning; two or more = CAUTION. ❌ = major warning; one is enough for AVOID.</p>')
+    section("What pushes the risk up or down?")
+    rules = [("bad", f"❌ {r}") for r in a["reasons"] if not r.startswith("Our model gives")] + \
+            [("warn", f"⚠️ {r}") for r in a["minor_reasons"] if not r.startswith("Our model gives")]
+    up = [("warn", f"⬆ {x[0].upper() + x[1:]}") for x in a["factors"]]
+    down = [("good", f"⬇ {x[0].upper() + x[1:]}") for x in a["calm_factors"]]
+    if rules:
+        ui('<p class="hl-small" style="margin:0 0 2px"><b>Danger signs</b> (❌ strong: one is enough for AVOID · ⚠️ warning: '
+           'two or more = CAUTION)</p>')
+        bullets(rules)
+    else:
+        bullets([("good", "✅ No danger sign is active right now.")])
+    if up:
+        ui('<p class="hl-small" style="margin:8px 0 2px"><b>Pushing the risk up</b></p>')
+        bullets(up)
+    if down:
+        ui('<p class="hl-small" style="margin:8px 0 2px"><b>Keeping the risk down</b></p>')
+        bullets(down)
     for s in a["similar"]:
-        ui(f'<p class="hl-small">The same situation ({h(s["desc"])}) happened {s["n"]} times in the reference coins: '
-           f'the typical low over the next 8h was {pct(s["median_dd"])}, and price fell ≥30% in {s["p30"] * 100:.0f}% '
-           'of cases.</p>')
-    hard = [x for x in a["filters"] if x["hit"] and x["keras"]]
+        ui(f'<p class="hl-small">This situation ({h(s["desc"])}) happened {s["n"]} times in the sample coins: usually price '
+           f'dipped to {pct(s["median_dd"])} in the next 8 hours, and it crashed 30%+ in {s["p30"] * 100:.0f}% of cases.</p>')
     parts = []
+    if rules:
+        parts.append(f"{len(rules)} danger sign{'s' if len(rules) > 1 else ''} on")
     if a["factors"]:
-        parts.append("the model's biggest worries are " + "; ".join(h(x) for x in a["factors"]))
-    if hard:
-        parts.append(f"{len(hard)} hard danger sign{'s' if len(hard) > 1 else ''} on, so the verdict is at least CAUTION")
+        parts.append(f"biggest worry: {h(a['factors'][0])}")
     if a["calm_factors"]:
-        parts.append("on the calm side: " + "; ".join(h(x) for x in a["calm_factors"][:2]))
-    txt = f"<b>{a['verdict']}</b> — " + ("; ".join(parts) if parts else "no danger sign is active and the model sees little risk")
-    conclude(txt + ".", LEVEL_CLASS[a["level"]])
+        parts.append(f"main comfort: {h(a['calm_factors'][0])}")
+    txt = (". ".join(p_[0].upper() + p_[1:] for p_ in parts) if parts else "Nothing stands out") + "."
+    conclude(txt[0].upper() + txt[1:], LEVEL_CLASS[a["level"]])
+
+
+def move_section(a):
+    """How far the price usually moves while you sleep."""
+    mv = a.get("move") or []
+    if not mv:
+        return
+    hours = f"{a['sleep_h']:g} hours"
+    section("How far can the price move while you sleep?",
+            f"The lowest and highest price during {hours}, measured over many past windows.")
+    rows = []
+    for m in mv:
+        d, u = m["down"], m["up"]
+        rows.append([m["source"], f"-{d[50]}% / +{u[50]}%", f"-{d[80]}% / +{u[80]}%", f"-{d[90]}% / +{u[90]}%",
+                     f"{m['n']:,}"])
+    table(["Based on", "Half of the nights", "8 of 10 nights", "9 of 10 nights", "Windows"], rows)
+    ui('<p class="hl-small">Read it like this: "in 8 of 10 nights, the price did not fall more than X% and did not rise '
+       'more than Y% at any point during the night". A range narrower than that often ends up out of range.</p>')
+    m = mv[0]
+    d, u = m["down"], m["up"]
+    txt = (f"In 8 of 10 past {a['sleep_h']:g}-hour windows ({m['source'].lower()}), the price stayed between <b>-{d[80]}%</b> and "
+           f"<b>+{u[80]}%</b>. In the worst 1 of 10 it fell more than {d[90]}%.")
+    if a["range_pct"] > 0:
+        inside = a["range_pct"] >= d[80]
+        txt += (f" Your ±{a['range_pct']:g}% range " + ("covers the usual drop." if inside else
+                                                         "is tighter than the usual drop, so it will often end out of range."))
+    conclude(txt, "warn" if d[80] >= 30 else "info")
+
+
+def holders_section(a):
+    """The biggest wallets: how much they hold, what they paid, and what they did lately."""
+    top, hs = a.get("holders") or [], a.get("holder_summary")
+    if not top:
+        return
+    usd, qu, S, t = a["usd"], a["quote"], a["supply"], a["now"]["t"]
+    section("Who holds the coin?", "The 10 biggest wallets (pools and contracts not counted). Big holders sitting on big "
+                                   "profits are the ones who can crash the price.")
+    rows = []
+    for i, x in enumerate(top, 1):
+        last = x["last"]
+        if last:
+            age = (t - last[0]) / 3600
+            word = {"buy": "bought", "sell": "sold", "xin": "received", "recv": "received", "xout": "sent out"}[last[1]]
+            amt = last[2] / S * 100
+            amt = f"{amt:.2f}%" if amt >= 0.01 else "<0.01%"
+            lm = f"{word} {amt} · " + (f"{age:.0f}h ago" if age >= 1 else "<1h ago")
+        else:
+            lm = "—"
+        prof = ("got it free", "warn-t") if x["free"] else ((f"{x['x']:.1f}x", "neg" if x["x"] >= 3 else "") if x["x"] else "—")
+        c24 = x["chg24"] * 100
+        rows.append([str(i), f"{x['wallet'][:6]}…{x['wallet'][-4:]}", f"{x['share'] * 100:.2f}%",
+                     money(x["entry"] * S, usd, qu) if x["entry"] else "—", prof, lm,
+                     (f"{c24:+.2f}%", "neg" if c24 <= -0.05 else "pos" if c24 >= 0.05 else "") if abs(c24) >= 0.005 else "—"])
+    table(["#", "Wallet", "Holds", "Bought at (mcap)", "Profit now", "Last move", "Change 24h"], rows)
+    ui('<p class="hl-small">"Holds" = share of all coins. "Bought at" = the market cap at their average buy price. "Profit '
+       'now" = how many times their buy price the coin is worth today ("got it free" = never bought: airdrop, claim or a '
+       'transfer from another wallet). "Change 24h" = how much of all coins they bought (+) or sold (-) in 24 hours.</p>')
+    w = (a.get("levels") or {}).get("whale")
+    parts = [f"The 10 biggest wallets hold <b>{hs['share'] * 100:.0f}%</b> of all coins, and <b>"
+             + of_them(hs["big_profit"], "is up 3x or more", "are up 3x or more") + "</b> (or got their coins free)"]
+    if hs["sold6"]:
+        parts.append(of_them(len(hs["sold6"]), "sold", "sold") + " in the last 6 hours")
+    elif hs["sold24"]:
+        parts.append(of_them(len(hs["sold24"]), "sold", "sold") + " in the last 24 hours")
+    else:
+        parts.append("none of them sold in the last 24 hours")
+    if w and w.get("drop10") is not None:
+        parts.append(f"if all 10 sold at once, the price would fall about {w['drop10'] * 100:.0f}%")
+    elif w and w.get("top10"):
+        parts.append("if all 10 sold at once, the price would fall more than 95%")
+    risky = hs["share"] >= 0.25 and hs["big_profit"] >= 5
+    txt = "; ".join(parts) + "." + (" A few sells from them can crash the price — watch these wallets." if risky else "")
+    conclude(txt, "bad" if risky and hs["sold6"] else "warn" if risky or hs["sold6"] else "info")
+
+
+def flow_section(a):
+    """Money coming in (buys) and going out (sells)."""
+    fl = a.get("flow") or []
+    if not fl:
+        return
+    k = a["usd"] or 1
+    section("Is money coming in or going out?", "All buys and sells of this coin in every pool.")
+    rows = []
+    for w in fl:
+        rows.append([f"Last {w['hours']}h", f"${compact(w['buy'] * k)}", f"${compact(w['sell'] * k)}",
+                     (usd_of(w["net"] * k), sign_class(w["net"])), f"{w['buyers']} / {w['sellers']}",
+                     f"${compact(w['max_buy'] * k)} / ${compact(w['max_sell'] * k)}",
+                     (f"{w['whale_net'] * 100:+.2f}%", sign_class(w["whale_net"])) if abs(w["whale_net"]) >= 0.0001 else "—"])
+    table(["", "Bought", "Sold", "Net", "Buyers / sellers", "Biggest buy / sell", "Big wallets net"], rows)
+    ui('<p class="hl-small">"Big wallets net" = what wallets that ever held 0.3%+ of all coins bought (+) or sold (-), as a '
+       'share of all coins.</p>')
+    f1, f4, f24 = (next((w for w in fl if w["hours"] == x), None) for x in (1, 4, 24))
+    side = flow_side
+    txt = f"Last hour: <b>{side(f1)}</b> ({usd_of(f1['net'] * k)}). Last 4 hours: {side(f4)} ({usd_of(f4['net'] * k)}). "
+    txt += f"Last 24 hours: {side(f24)} ({usd_of(f24['net'] * k)})."
+    kind = "info"
+    if f4["whale_net"] <= -0.005:
+        txt += f" Big wallets are selling ({f4['whale_net'] * 100:.2f}% of all coins in 4 hours) — a warning sign."
+        kind = "warn"
+    elif f4["whale_net"] >= 0.005:
+        txt += f" Big wallets are buying ({f4['whale_net'] * 100:+.2f}% of all coins in 4 hours)."
+    if f24["whale_net"] <= -0.01 and f4["whale_net"] > -0.005:
+        txt += (f" Over 24 hours, big wallets sold {abs(f24['whale_net']) * 100:.1f}% of all coins (net) — they have been taking "
+                "profit.")
+        kind = "warn"
+    if f1["sell"] > 2 * f1["buy"] and f1["sell"] > 0:
+        kind = "warn"
+    conclude(txt, kind)
 
 
 def liquidity_section(a):
-    """Real LP liquidity around the price (vertical profile) + support zones from price action."""
+    """Real LP liquidity around the price (vertical profile) + price floors from price action."""
     lv = a.get("levels")
     if not lv or (not lv["zones"] and not lv["depth"]):
         return
     usd, qu, dep = a["usd"], a["quote"], lv["depth"]
-    section("Liquidity & support", "How much selling (and buying) the pools absorb around the current price, what "
-                                   "traded at each price, and where buyers stepped in before.")
+    section("Liquidity and price floors", "How much money sits in the pools around the price, and where buyers stepped in "
+                                          "before.")
     items = []
     if dep:
         up = dep.get("up_usd")
-        items.append(("info", f"To push the price down 10% / 30% / 50%, someone has to sell about ${compact(dep['usd'][10])} / "
-                              f"${compact(dep['usd'][30])} / ${compact(dep['usd'][50])} worth of tokens"
-                              + (f"; to push it up 10% / 30%, buy about ${compact(up[10])} / ${compact(up[30])}" if up and len(up) > 30 else "")
-                              + f" (LP liquidity in {lv['n_pools']} USDG & ETH pools, linked by arbitrage)."))
+        items.append(("info", f"To push the price down 10% / 30% / 50%, someone must sell about ${compact(dep['usd'][10])} / "
+                              f"${compact(dep['usd'][30])} / ${compact(dep['usd'][50])}."
+                              + (f" To push it up 10% / 30%: buy about ${compact(up[10])} / ${compact(up[30])}."
+                                 if up and len(up) > 30 else "")))
     w = lv.get("whale")
     if w and w["drop1"] is not None:
         items.append(("warn" if w["drop1"] >= 0.3 else "info",
-                      f"The largest wallet holds {w['top1'] / a['supply'] * 100:.1f}% of supply: if it sold everything at once, "
-                      f"the price would drop about {w['drop1'] * 100:.0f}%."
-                      + (f" The top-10 wallets ({w['top10'] / a['supply'] * 100:.0f}% of supply): "
-                         + (f"about {w['drop10'] * 100:.0f}%." if w["drop10"] is not None else "more than 95%.")
-                         if w["top10"] else "")))
+                      f"The biggest wallet holds {w['top1'] / a['supply'] * 100:.1f}% of all coins. If it sold everything at "
+                      f"once, the price would fall about {w['drop1'] * 100:.0f}%."))
     for a0, a1 in lv["holes"]:
-        items.append(("bad", f"Thin liquidity between {pct(a0)} and {pct(a1)}: if price falls into this gap it can slide fast."))
+        items.append(("bad", f"Almost no liquidity between {pct(a0)} and {pct(a1)}: if the price gets there, it can fall fast."))
     if dep and dep.get("inconsistent"):
-        items.append(("warn", "Part of the liquidity map was inconsistent (pools with special hooks); treat the numbers as rough."))
+        items.append(("warn", "Part of the liquidity map looked odd (pools with special hooks), so treat these numbers as rough."))
     bullets(items)
     if dep:
         ch, _ = liquidity_profile(a, lv)
         st.altair_chart(ch, theme=None)
-        ui('<p class="hl-small">Left: USD of LP liquidity in each 2% price band — green below the price (it pays sellers, '
-           'so it slows a drop), purple above (it sells to buyers, so it slows a pump). Right: how much traded at each '
-           'price in the last 7 days. Shaded bands = support zones; the light band between dashed lines = the best range '
-           'below. Live snapshot, refreshed at most every 15 minutes.</p>')
+        ui('<p class="hl-small">Each bar = money in the pools at that price. <b>Green</b> (below the price) buys from sellers, '
+           'so it slows a fall. <b>Purple</b> (above) sells to buyers, so it slows a pump. <b>Grey</b> (right) = how much was '
+           'traded at that price in the last 7 days. Shaded bands = price floors. Dashed lines = the suggested range. '
+           'Updated every 15 minutes at most.</p>')
     if lv["zones"]:
         rows = []
         for z in lv["zones"]:
             age = f"{z['age_h']:.0f}h ago (+{z['bounce'] * 100:.0f}%)" if z["age_h"] is not None else "—"
             rows.append([money(z["price"] * a["supply"], usd, qu), (pct(z["drop"]), "neg"),
                          (z["strength"], {"strong": "yes", "medium": "", "weak": "no"}[z["strength"]]), str(z["touches"]), age,
-                         f"${compact(z['liq_usd'])}" if z["liq_usd"] is not None else "—",
                          f"${compact(z['sell_usd'])}" if z["sell_usd"] is not None else "—"])
-        table(["Support (mcap)", "Distance", "Strength", "Bounces (7d)", "Last bounce", "Liquidity in zone",
-               "Selling needed to get there"], rows)
+        table(["Price floor (mcap)", "How far", "Strength", "Bounces (7 days)", "Last bounce", "Selling needed to get there"],
+              rows)
     t = lv.get("test") or {}
-    if t.get("strong") and t.get("plain"):
+    with how("How are price floors found?"):
         r = lambda k: f"{t[k]['rate'] * 100:.0f}%" if t.get(k) and t[k]["rate"] is not None else "—"
-        ui(f'<p class="hl-small">Support = a ±{ZONE * 100:.0f}% zone around a 7-day swing low that bounced ≥10%, a thick '
-           'liquidity band, or a high-volume price. Strength = how many times price bounced there in the last 7 days '
-           f'(3+ = strong), plus thick LP liquidity. Tested on the sample coins, when price touched a zone within 24h: strong zones '
-           f'held {r("strong")} of the time, medium {r("medium")}, weak {r("weak")}, and ordinary levels {r("plain")}. '
-           'Supports help you place the lower bound; they are not a guarantee, and dump-prone coins break them often.</p>')
+        ui(f'<p class="hl-small">A price floor is a ±{ZONE * 100:.0f}% zone where the price bounced 10%+ in the last 7 days, '
+           'where a lot of liquidity sits, or where a lot was traded. Strong = 3 or more bounces. In tests on the sample coins, '
+           f'when the price came back to a floor within 24 hours, strong floors held {r("strong")} of the time, medium '
+           f'{r("medium")}, weak {r("weak")} (a random price level held {r("plain")}). Floors break often in coins that '
+           'are about to dump.</p>')
     conclude(*liquidity_conclusion(a, lv))
 
 
@@ -717,34 +898,24 @@ def liquidity_conclusion(a, lv):
     firm = [z for z in zs if z["strength"] in ("strong", "medium")]
     if firm:
         z = firm[0]
-        parts.append(f"first real floor: the {z['strength']} support at <b>{pct(z['drop'])}</b> "
-                     f"(mcap {h(money(z['price'] * a['supply'], usd, qu))}, {z['touches']} bounce{'' if z['touches'] == 1 else 's'} in 7 days)")
-        nxt = [x for x in firm[1:]]
-        if nxt:
-            parts[-1] += f", then {pct(nxt[0]['drop'])}"
+        parts.append(f"the first real floor is at <b>{pct(z['drop'])}</b> (mcap {h(money(z['price'] * a['supply'], usd, qu))}, "
+                     f"bounced {z['touches']} time{'' if z['touches'] == 1 else 's'} this week)")
     elif zs:
-        parts.append(f"only weak supports nearby (closest {pct(zs[0]['drop'])}), so there is no proven floor")
+        parts.append(f"there are only weak floors nearby (closest {pct(zs[0]['drop'])})")
         kind = "warn"
     else:
-        parts.append("no support zone within −50%")
+        parts.append("there is no price floor within -50%")
         kind = "warn"
-    if dep:
-        up = dep.get("up_usd")
-        if up and len(up) > 10 and dep["usd"][10]:
-            ratio = up[10] / dep["usd"][10]
-            side = ("about balanced" if 0.67 <= ratio <= 1.5 else "heavier above the price (pumps get sold into)"
-                    if ratio > 1.5 else "heavier below the price (dips get bought)")
-            parts.append(f"liquidity within ±10% is {side}")
-        if lv["holes"]:
-            a0, a1 = lv["holes"][0]
-            parts.append(f"a thin gap between {pct(a0)} and {pct(a1)} lets price slide fast")
-            kind = "warn"
+    if dep and lv["holes"]:
+        a0, a1 = lv["holes"][0]
+        parts.append(f"between {pct(a0)} and {pct(a1)} there is almost no liquidity, so a fall there can be fast")
+        kind = "warn"
     if w and w["drop1"] is not None:
         if w["drop1"] >= 0.3:
-            parts.append(f"whale risk is high: the largest wallet alone could push price down {w['drop1'] * 100:.0f}%")
+            parts.append(f"one wallet alone could push the price down {w['drop1'] * 100:.0f}%")
             kind = "bad" if w["drop1"] >= 0.5 else "warn"
         else:
-            parts.append(f"the largest wallet could move price only {w['drop1'] * 100:.0f}%")
+            parts.append(f"no single wallet can move the price more than {w['drop1'] * 100:.0f}%")
     text = "; ".join(parts) + "."
     return text[0].upper() + text[1:], kind
 
@@ -754,43 +925,43 @@ def range_section(a):
     rec, usd, f, qu = a.get("best_range"), a["usd"], a["now"], a["quote"]
     if not rec:
         return range_section_basic(a)
-    fy, best, hours = rec["fee"], rec["best"], f"{a['sleep_h']:g}h"
-    section("Best LP range from the current price",
-            f"Researched on {rec['coins']} sample coins: at every past hour that looked like now "
-            f"(same verdict and volatility, {rec['n']:,} moments), LP positions with 133 different ranges were opened and left "
-            f"for {hours}. Fees come from the real trading volume that followed, scaled to this pool's fee level today.")
-    fee_txt = (f"this pool's {fee_pct(fy['rate'])} fee × ${compact(fy['vol24'])} traded in 24h ÷ ${compact(fy['tvl'])} active "
-               f"liquidity ≈ <b>{fy['r'] * 100:.2f}% per day</b> for a full-range LP" if fy["rate"] is not None and not fy["assumed"]
-               else f"<b>{fy['r'] * 100:.2f}% per day</b> assumed")
-    ui(f'<div class="hl-note">Fee level now: {fee_txt}. Your ${compact(fy["position"])} position would be '
-       f'{fy["share"] * 100:.2f}% of the pool\'s liquidity' + (" — big enough to dilute your own fees" if fy["share"] > 0.05 else "")
-       + "." + ("".join(f" Note: {h(n)}." for n in fy["notes"])) + "</div>")
+    fy, best, hours, pos = rec["fee"], rec["best"], f"{a['sleep_h']:g} hours", a["position_usd"]
+    section("Which LP range should you open?",
+            f"We opened 133 different ranges in {rec['n']:,} past moments like this one and checked the result after {hours}.")
+    if fy["rate"] is not None and not fy["assumed"]:
+        fee_txt = (f"This pool takes a {fee_pct(fy['rate'])} fee per trade. ${compact(fy['vol24'])} was traded in 24 hours and the "
+                   f"pools hold ${compact(fy['tvl'])}, so a full-range LP earns about <b>{fy['r'] * 100:.2f}% a day</b>.")
+    else:
+        fee_txt = f"We assumed a full-range LP earns about <b>{fy['r'] * 100:.2f}% a day</b>."
+    ui(f'<div class="hl-note">{fee_txt} Your {dollars(pos)} would be {fy["share"] * 100:.2f}% of the pool'
+       + (" — big enough to shrink your own share of the fees" if fy["share"] > 0.05 else "") + "."
+       + "".join(f" Note: {h(n)}." for n in fy["notes"]) + "</div>")
     px, fdv = f["px"], f["px"] * a["supply"]
     rng = best["range"]
     if rec["skip"]:
-        ui('<div class="hl-alert warn">⚠️ <b>At this fee level, no range came out ahead</b> in similar past moments — '
-           'not opening is the best choice. If you still open one, the least-bad range is shown below.</div>')
+        ui('<div class="hl-alert warn">⚠️ <b>No range came out ahead</b> in similar past moments at this fee level: over many '
+           'nights, the bad nights outweighed the fees. Waiting is the best choice. If you still want to open one, this is the '
+           'least-bad range:</div>')
     if rg.is_full(rng):
-        lo_tile = ("Lower bound", "none", "", "full range")
-        hi_tile = ("Upper bound", "none", "", "full range")
+        lo_tile, hi_tile = ("Lower bound", "none", "", "full range"), ("Upper bound", "none", "", "full range")
     else:
-        lo_tile = ("Lower bound (min price)", f"−{rng[0]:g}%", "warn-t",
+        lo_tile = ("Lower bound (min price)", f"-{rng[0]:g}%", "warn-t",
                    f"{price_str(px * (1 - rng[0] / 100), usd, qu)} · mcap {money(fdv * (1 - rng[0] / 100), usd, qu)}")
         hi_tile = ("Upper bound (max price)", f"+{rng[1]:g}%", "pos",
                    f"{price_str(px * (1 + rng[1] / 100), usd, qu)} · mcap {money(fdv * (1 + rng[1] / 100), usd, qu)}")
     tiles([lo_tile, hi_tile,
-           (f"Average result ({hours})", pct1(best["mean"]), sign_class(best["mean"]),
-            f"fees {pct1(best['fees'])} · price {pct1(best['price'])}"),
-           ("Bad case (1 in 10)", pct1(best["p10"]), sign_class(best["p10"]),
-            f"loss >20%: {best['big_loss'] * 100:.1f}% of the time")])
+           (f"Average result ({hours})", usd_of(best["mean"] * pos), sign_class(best["mean"]),
+            f"{pct1(best['mean'])} · fees {usd_of(best['fees'] * pos)}"),
+           ("Bad night (1 in 10)", usd_of(best["p10"] * pos), sign_class(best["p10"]),
+            f"{pct1(best['p10'])} · lose 20%+: {best['big_loss'] * 100:.1f}% of nights")])
     if not rg.is_full(rng):
         u = best["usdg"]
         ui(f'<p class="hl-small" style="margin-bottom:8px">You start with about <b>{u * 100:.0f}% {pair_unit(a)}</b> and '
-           f'{(1 - u) * 100:.0f}% coin. If the price falls, the position buys the coin step by step; below −{rng[0]:g}% '
-           f'you hold only the coin. Above +{rng[1]:g}% you hold only {pair_unit(a)} — no loss, it just stops earning fees.</p>')
-    rows = []
-    seen = set()
-    opts = [("Best range", best), ("Best two-sided range", rec["two_sided"]), ("Full range", rec["full"])]
+           f'{(1 - u) * 100:.0f}% coin. If the price falls, the position slowly buys the coin; below -{rng[0]:g}% you hold only '
+           f'the coin. If the price rises above +{rng[1]:g}%, you hold only {pair_unit(a)}: no loss, it just stops earning '
+           'fees.</p>')
+    rows, seen = [], set()
+    opts = [("Best range", best), ("Best range with more upside", rec["two_sided"]), ("Full range", rec["full"])]
     if rec["mine"]:
         plan = "full range" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}%"
         opts.append((f"Your plan ({plan})", rec["mine"]))
@@ -798,28 +969,28 @@ def range_section(a):
         if c["range"] in seen:
             continue
         seen.add(c["range"])
-        rows.append([name, c["label"], f"{c['usdg'] * 100:.0f}%", (pct1(c["mean"]), sign_class(c["mean"])),
-                     (pct1(c["median"]), sign_class(c["median"])), (pct1(c["p10"]), sign_class(c["p10"])),
-                     f"{c['big_loss'] * 100:.1f}%", pct1(c["fees"]), f"{c['inside'] * 100:.0f}%"])
-    table(["", "Range", f"Start in {pair_unit(a)}", f"Average ({hours})", "Typical", "Bad case (1 in 10)", "Loss > 20%",
-           "Fees", "In range at the end"], rows)
+        rows.append([name, c["label"], f"{c['usdg'] * 100:.0f}%", (usd_of(c["mean"] * pos), sign_class(c["mean"])),
+                     (usd_of(c["p10"] * pos), sign_class(c["p10"])), f"{c['big_loss'] * 100:.1f}%", usd_of(c["fees"] * pos),
+                     f"{c['inside'] * 100:.0f}%"])
+    table(["", "Range", f"Starts in {pair_unit(a)}", "Average", "Bad night (1 in 10)", "Lose 20%+", "Fees",
+           "In range at end"], rows)
+    ui(f'<p class="hl-small">Dollar amounts are for your {dollars(pos)} over {hours}, averaged over similar past moments.</p>')
     with st.expander("Range map: every lower × upper bound"):
         st.altair_chart(range_map(rec), theme=None, width="stretch")
-        ui('<p class="hl-small">Each cell = growth per night if you opened that range in every similar moment (the average '
-           'of log returns: big losses count extra, like they do for your real balance). Blue grows your money, red loses '
-           'it. The outlined cell is the best range.</p>')
+        ui('<p class="hl-small">Each square = how that range did on average in similar moments. Blue = made money, red = lost '
+           'money. Big losses count extra (like they do for your real balance). The outlined square is the best range.</p>')
     near = [z for z in (a.get("levels") or {}).get("zones", [])
             if not rg.is_full(rng) and -rng[0] / 100 <= z["drop"] < 0 and z["strength"] in ("strong", "medium")]
     if near:
-        ui('<p class="hl-small">Support inside this range: ' + ", ".join(
-            f"{pct(z['drop'])} ({z['strength']})" for z in near) + ' — bounces there keep your position earning.</p>')
-    test = range_test_note(rec)
-    if test:
-        ui(f'<p class="hl-small">{test}</p>')
-    ui('<p class="hl-small">Why ranges below the price win: most sample coins drifted down after busy moments, and an LP '
-       'range is "short volatility" — a drop through it leaves you holding the coin, while a pump above it only caps your '
-       'gain. A range that sits mostly below the price earns fees while buying the dip slowly. If you expect a pump, the '
-       'two-sided row keeps more upside. Past behaviour of 24 coins, not a guarantee.</p>')
+        ui('<p class="hl-small">Price floors inside this range: ' + ", ".join(
+            f"{pct(z['drop'])} ({z['strength']})" for z in near) + ' — bounces there keep the position earning.</p>')
+    with how("How was this tested, and why is the range mostly below the price?"):
+        test = range_test_note(rec)
+        ui('<p class="hl-small">' + (test + " " if test else "") +
+           'Why mostly below the price: most sample coins drifted down after busy moments. If the price falls through your '
+           'range, you end up holding only the coin; if it pumps above your range, your gain is capped. A range that sits '
+           'mostly below the price earns fees while buying the dip slowly. If you expect a pump, the "more upside" row keeps '
+           'more of it. This is past behaviour of 24 coins, not a guarantee.</p>')
     conclude(*range_conclusion(a, rec))
 
 
@@ -833,29 +1004,28 @@ def range_test_note(rec):
         return None
     t = min(test, key=lambda x: abs(math.log(x["r"] / max(rec["r"], 1e-4))) + abs(math.log(x["share"] / max(rec["share"], 1e-4))) * 0.5)
     o, fu, fx = t["optimal"], t["full"], t["-40/+50"]
-    return (f"Tested on coins it had not seen (fee level {t['r'] * 100:g}%/day, position {t['share'] * 100:g}% of the pool): "
-            f"choosing the range this way — and skipping when nothing comes out ahead — grew money "
-            f"{o['growth'] * 100:+.2f}% per night vs {fu['growth'] * 100:+.2f}% for full range and {fx['growth'] * 100:+.2f}% for "
-            f"−40%/+50%; losses over 20% happened {o['big_loss'] * 100:.1f}% of the time vs {fu['big_loss'] * 100:.1f}% and "
-            f"{fx['big_loss'] * 100:.1f}%. Better than full range on {t['beats_full']} of {t['coins']} coins.")
+    return (f"We tested this on coins the tool had not seen (fee {t['r'] * 100:g}% a day, position {t['share'] * 100:g}% of "
+            f"the pool). Picking the range this way, and skipping when nothing made money, did better than full range on "
+            f"{t['beats_full']} of {t['coins']} coins. Nights with a 20%+ loss: {o['big_loss'] * 100:.1f}% (full range "
+            f"{fu['big_loss'] * 100:.1f}%, -40%/+50% range {fx['big_loss'] * 100:.1f}%).")
 
 
 def range_conclusion(a, rec):
-    best, mine, hours = rec["best"], rec["mine"], f"{a['sleep_h']:g}h"
+    best, mine, hours, pos = rec["best"], rec["mine"], f"{a['sleep_h']:g} hours", a["position_usd"]
     if rec["skip"]:
-        txt = (f"<b>Skip this one</b> at today's fee level ({rec['fee']['r'] * 100:.2f}%/day): even the least-bad range "
-               f"({h(best['label'])}) averaged {pct1(best['mean'])} in {hours} in similar moments.")
+        txt = (f"<b>Skip for now.</b> At today's fees, every range lost money over many nights in similar moments: the bad "
+               f"nights outweighed the good ones. The least-bad range ({h(best['label'])}) {lost_or_made(best['p10'] * pos)} on a "
+               "bad night.")
         if mine and mine["range"] != best["range"]:
-            txt += f" Your plan averaged {pct1(mine['mean'])}, with a 1-in-10 bad case of {pct1(mine['p10'])}."
+            txt += f" Your plan {lost_or_made(mine['p10'] * pos)} on a bad night."
         return txt, "warn"
-    txt = (f"Open <b>{h(best['label'])}</b>: about {pct1(best['mean'])} on average over {hours} (fees {pct1(best['fees'])}), "
-           f"and in the worst 1 of 10 similar moments {pct1(best['p10'])}.")
+    txt = (f"Open <b>{h(best['label'])}</b>: about {usd_of(best['mean'] * pos)} on average over {hours}, and "
+           f"{usd_of(best['p10'] * pos)} on a bad night (1 in 10).")
     if mine and mine["range"] != best["range"]:
-        better = mine["growth"] < best["growth"]
-        txt += (f" Your plan averaged {pct1(mine['mean'])} with a bad case of {pct1(mine['p10'])}"
-                + (" — the best range is the safer bet." if better else "."))
+        txt += (f" Your plan: {usd_of(mine['mean'] * pos)} on average, {usd_of(mine['p10'] * pos)} on a bad night"
+                + (" — the best range is safer." if mine["growth"] < best["growth"] else "."))
     if a["level"] == 2:
-        return txt + " But the verdict is AVOID: the safest choice is still not to open.", "bad"
+        return txt + " But the verdict is AVOID, so the safest choice is still not to open.", "bad"
     return txt, "good" if best["mean"] > 0 else "warn"
 
 
@@ -917,16 +1087,16 @@ def analog_section(a):
     q = a.get("analogs")
     if not q:
         return
-    section("Similar past moments", "Every hour of history in the sample coins was compared with right now on pattern, "
-                                    "price action, whales, technicals and coin profile. Here is what happened next.")
+    section("What happened after similar moments?",
+            "We compared right now with every past hour in the sample coins (chart pattern, price moves, indicators, coin "
+            "profile) and picked the 30 closest matches.")
     kind = "bad" if q["p30"] >= 0.35 else "warn" if q["p30"] >= 0.15 else "good"
-    ui(f'<div class="hl-alert {kind}"><b>{q["n30"]} of the {q["n"]} closest moments</b> (from {q["tokens"]} coins) dropped '
-       f'≥30% within 8 hours ({q["p30"] * 100:.0f}% weighted by similarity). Typical low over the next 8h: '
-       f'{pct(q["median_dd"])}' + (f', typical high: {pct(q["median_rise"])}' if q["median_rise"] is not None else "")
-       + '.</div>')
+    ui(f'<div class="hl-alert {kind}"><b>{q["n30"]} of the {q["n"]} closest moments</b> (from {q["tokens"]} coins) crashed 30%+ '
+       f'within 8 hours. Usually the price dipped to {pct(q["median_dd"])} at its lowest'
+       + (f' and reached {pct(q["median_rise"])} at its highest' if q["median_rise"] is not None else "") + '.</div>')
     gs = q["group_sim"]
-    cells = [(GROUP_LABEL[g], f"{gs[g] * 100:.0f}%" if gs.get(g) is not None else "—", "", None) for g in GROUP_LABEL]
-    tiles(cells[:4])
+    names = {"pattern": "Pattern match", "price": "Price-move match", "whale": "Big-holder match", "tech": "Indicator match"}
+    tiles([(names[g], f"{gs[g] * 100:.0f}%" if gs.get(g) is not None else "—", "", None) for g in names])
     rows = []
     for e in q["examples"][:6]:
         g = e["groups"]
@@ -934,39 +1104,43 @@ def analog_section(a):
                     + [f"{g[x] * 100:.0f}%" if g.get(x) is not None else "—" for x in ("pattern", "price", "whale", "tech")]
                     + [(pct(e["dd"]), "neg" if e["dd"] <= -0.3 else ""),
                        (pct(e["rise"]), "pos") if e["rise"] is not None else "—"])
-    table(["Coin", "When (UTC)", "Match", "Pattern", "Price", "Whales", "Tech", "Next 8h low", "Next 8h high"], rows)
-    used = ", ".join(GROUP_LABEL[g].lower() for g in ANALOG_GROUPS)
-    ui(f'<p class="hl-small">Match % per side (100% = identical). The outcome uses {used}; whale similarity is shown for '
-       'context only, because in testing on the sample coins it made the matches slightly less predictive. At most one '
-       'moment per coin per 12 hours, so one event is not counted many times.</p>')
+    table(["Coin", "When (UTC)", "Match", "Pattern", "Price", "Big holders", "Indicators", "Lowest next 8h",
+           "Highest next 8h"], rows)
+    with how():
+        ui('<p class="hl-small">Match = how alike that moment was to now (100% = identical), overall and per side. At most one '
+           'moment per coin per 12 hours is used, so one event is not counted many times. The big-holder side is shown but '
+           'not used for the result, because in tests it made the matches slightly worse.</p>')
     ex = q["examples"][0] if q["examples"] else None
-    calm = q["p30"] < 0.15
-    txt = (f"{'Calm' if calm else 'Risky' if q['p30'] >= 0.35 else 'Mixed'} history for setups like this: "
-           f"{q['p30'] * 100:.0f}% of the closest moments dumped ≥30% within 8h and the typical 8h low was {pct(q['median_dd'])}.")
+    word = "calm" if q["p30"] < 0.15 else "risky" if q["p30"] >= 0.35 else "mixed"
+    txt = (f"Moments like this were <b>{word}</b>: {q['n30']} of 30 crashed within 8 hours, and usually the price dipped to "
+           f"{pct(q['median_dd'])}.")
     if ex:
-        txt += f" Closest match: {h(ex['symbol'])} on {when(ex['t'])} ({ex['sim'] * 100:.0f}% similar), which then went {pct(ex['dd'])} at worst."
+        txt += f" The closest match, {h(ex['symbol'])} on {when(ex['t'])}, went {pct(ex['dd'])} at its lowest."
     if q["sim"] < 0.5:
-        txt += " Matches are loose (average similarity under 50%), so this angle counts less."
+        txt += " The matches are not very close, so trust this part less."
     conclude(txt, kind)
 
 
 def comparison(a):
     """This coin vs the reference coins right before their crashes."""
-    cmp, names = a["compare"], names_text(a["ref_names"])
-    section("Compared with crashes in the reference coins",
-            "The signs visible at the top right before each big crash, and which of them this coin shows now.")
+    cmp = a["compare"]
+    section("Does it look like a coin right before a crash?",
+            "At the top, right before each big crash in the sample coins, we noted which warning signs were showing. "
+            "Here they are next to this coin.")
     if not cmp:
-        ui('<div class="hl-alert warn">No reference data yet (reference.json is empty).</div>')
+        ui('<div class="hl-alert warn">No reference data yet.</div>')
         return
     b = cmp["best"]
+    have = [SHORT[c] for c in b["signs"] if c in cmp["now"]]
+    miss = [SHORT[c] for c in b["signs"] if c not in cmp["now"]]
     name = f"<b>{h(b['symbol'])} right before its {pct(b['drop'])} crash</b> ({when(b['peak_t'])} UTC)"
     if b["sim"] >= 0.8:
-        ui(f'<div class="hl-alert bad">🚨 Very similar to {name}: {b["match"]} of {b["total"]} signs match.</div>')
+        ui(f'<div class="hl-alert bad">🚨 Looks very much like {name}: {b["match"]} of its {b["total"]} signs are here.</div>')
     elif b["sim"] >= 0.5:
-        ui(f'<div class="hl-alert warn">⚠️ Somewhat similar to {name}: {b["match"]} of {b["total"]} signs match.</div>')
+        ui(f'<div class="hl-alert warn">⚠️ Looks partly like {name}: {b["match"]} of its {b["total"]} signs are here.</div>')
     else:
-        ui(f'<div class="hl-alert good">👍 Not similar. The closest is {name}, with only {b["match"]} of {b["total"]} '
-           'signs matching.</div>')
+        ui(f'<div class="hl-alert good">👍 Does not look like a coin before a crash. The closest is {name}, with only '
+           f'{b["match"]} of its {b["total"]} signs.</div>')
 
     def cell(code, signs, values):
         return (("✓ " if code in signs else "— ") + values.get(code, ""), "yes" if code in signs else "no")
@@ -980,29 +1154,27 @@ def comparison(a):
         for code, _, _, _ in SIGNS:
             rows.append([SHORT[code], cell(code, cmp["now"], cmp["values"])]
                         + [cell(code, c["signs"], c["values"]) for c in crash_list])
-        rows.append(["Signs in common", f"{len(cmp['now'])} active"] + [f"{c['match']} of {c['total']}" for c in crash_list])
+        rows.append(["Signs in common", f"{len(cmp['now'])} showing"] + [f"{c['match']} of {c['total']}" for c in crash_list])
         return header, rows
 
     table(*build(cmp["crashes"][:4]), sum_last=True)
+    ui('<p class="hl-small">✓ = the sign was showing. Each column = a coin at its top, right before it crashed (the 4 most '
+       'similar shown). Last row = how many of that coin\'s signs this coin shows now.</p>')
     if b["sim"] >= 0.8:
-        conclude(f"This coin looks like <b>{h(b['symbol'])} right before its {pct(b['drop'])} crash</b> — treat it as a strong "
-                 "warning, even if other angles look calm.", "bad")
+        conclude(f"This coin looks like <b>{h(b['symbol'])} right before its {pct(b['drop'])} crash</b>. Treat it as a strong "
+                 "warning, even if other parts look calm.", "bad")
     elif b["sim"] >= 0.5:
-        conclude(f"Partly similar to {h(b['symbol'])} before its {pct(b['drop'])} crash ({b['match']} of {b['total']} signs). "
-                 "Not a crash setup yet, but watch for the missing signs.", "warn")
+        txt = (f"{len(have)} of the {b['total']} signs {h(b['symbol'])} had before its {pct(b['drop'])} crash are here"
+               + (f" ({h(', '.join(have).lower())})" if have else "") + ".")
+        if miss:
+            txt += f" Still missing: <b>{h(', '.join(miss).lower())}</b>. If that shows up too, get out."
+        conclude(txt, "warn")
     else:
-        conclude(f"No resemblance to the pre-crash setups of the reference coins (best match {b['match']} of {b['total']} "
-                 "signs).", "good")
-    ui('<p class="hl-small">Each reference column = conditions at the price top right before that crash (the 4 most '
-       'similar shown). ✓ = the sign was present. Last row: how many of that crash\'s signs this coin shows now.</p>')
+        conclude(f"No crash setup here: the closest crash shares only {b['match']} of {b['total']} signs.", "good")
     if len(cmp["crashes"]) > 4:
-        with st.expander(f"See all {len(cmp['crashes'])} reference crashes"):
+        with st.expander(f"See all {len(cmp['crashes'])} crashes"):
             table(*build(cmp["crashes"]), sum_last=True)
-            ui('<p class="hl-small">' + h("Market cap at the top: " + ", ".join(
-                f"{c['symbol']} {when(c['peak_t'])[:-6]} "
-                f"{money(c['fdv'], 1.0 if c['quote'] == 'USDG' else a['eth_usd'] if c['quote'] in ('ETH', 'WETH') else None, c['quote'])}"
-                for c in cmp["crashes"]) + ".") + "</p>")
-    with st.expander("What each sign means & how reliable it is"):
+    with how("What each sign means & how reliable it is"):
         ui('<ul class="hl-list">' + "".join(f'<li class="info">{h(label)}</li>' for _, label, _, _ in SIGNS) + "</ul>")
         lines = []
         for x in a["similarity_test"]:
@@ -1012,60 +1184,59 @@ def comparison(a):
                 continue
             p_hi, p_lo = hi[2] / hi[0], lo[2] / lo[0]
             ok = p_hi > p_lo * 1.5
-            lines.append(f'<li class="{"good" if ok else "warn"}"><b>{h(x["symbol"])}</b> '
-                         f'({"confirmed" if ok else "not confirmed"}): at ≥80% similarity, {p_hi * 100:.0f}% fell ≥50% '
-                         f'within 8h; below 50%, {p_lo * 100:.0f}%.</li>')
-        ui('<p class="hl-small">Cross-test: each reference coin is matched only against the pre-crash conditions of the '
-           'other coins, then we look at what happened 8 hours later.</p><ul class="hl-list">' + "".join(lines) + "</ul>"
-           '<p class="hl-small">Crashes without at least 3 signs are not used. Treat this as a strong hint, not a '
-           f'prediction. ≥80% similarity to {h(names)} raises an OK verdict to CAUTION.</p>')
+            lines.append(f'<li class="{"good" if ok else "warn"}"><b>{h(x["symbol"])}</b>: when it looked 80%+ like another '
+                         f'coin before a crash, it fell 50%+ within 8 hours {p_hi * 100:.0f}% of the time; when it looked '
+                         f'less than 50% alike, {p_lo * 100:.0f}%.</li>')
+        ui('<p class="hl-small">Check on each sample coin (compared only with the other coins\' crashes):</p>'
+           '<ul class="hl-list">' + "".join(lines) + "</ul>"
+           '<p class="hl-small">Crashes with fewer than 3 signs are not used. Looking 80%+ like a coin before a crash turns an '
+           'OK verdict into CAUTION.</p>')
 
 
 def tech_rows(t):
-    """(label, value text, explanation, feature names) for the technical view."""
+    """(label, value text, explanation, feature names) for the indicator list."""
     out = []
     et, st_ = t.get("ema_trend"), t.get("structure")
     if et is not None:
-        trend = "Uptrend" if et > 0.02 and (st_ or 0) >= 0 else "Downtrend" if et < -0.02 and (st_ or 0) <= 0 else "Sideways / mixed"
+        trend = "Going up" if et > 0.02 and (st_ or 0) >= 0 else "Going down" if et < -0.02 and (st_ or 0) <= 0 else "Sideways"
         swing = {1: "higher highs and higher lows", -1: "lower highs and lower lows", 0: "mixed swings"}.get(st_, "not enough swings")
-        out.append(("Trend (1h)", trend, f"EMA20 is {pct(et)} vs EMA50; swings show {swing}.", ["ema_trend", "structure"]))
+        out.append(("Trend (1h chart)", trend, f"short average {pct(et)} vs long average; {swing}", ["ema_trend", "structure"]))
     if t.get("ema_gap") is not None:
         g = t["ema_gap"]
-        out.append(("Stretch", pct(g), "above its 1h EMA20" + (" — stretched, pullbacks are common from here" if g > 0.15 else "")
-                    if g >= 0 else "below its 1h EMA20", ["ema_gap"]))
+        out.append(("Distance from average", pct(g), ("above the 1h average" + (" — stretched, pullbacks are common" if g > 0.15 else ""))
+                    if g >= 0 else "below the 1h average", ["ema_gap"]))
     if t.get("rsi1h") is not None:
         r = t["rsi1h"]
-        out.append(("RSI 1h", f"{r:.0f}", "overbought — rallies often pause here" if r >= 70 else
-                    "oversold — bounces are common, but so are further drops in dumps" if r <= 30 else "neutral",
-                    ["rsi1h"]))
+        out.append(("RSI (1h)", f"{r:.0f}", "overbought — pumps often pause here" if r >= 70 else
+                    "oversold — bounces are common, but dumps can keep going" if r <= 30 else "neutral", ["rsi1h"]))
     if t.get("vwap_gap") is not None:
-        out.append(("vs 24h VWAP", pct(t["vwap_gap"]), "vs the volume-weighted average price of the last 24h", ["vwap_gap"]))
+        out.append(("vs 24h average price", pct(t["vwap_gap"]), "compared with the average traded price of the last 24h",
+                    ["vwap_gap"]))
     if t.get("bb_pctb") is not None:
         b = t["bb_pctb"]
-        out.append(("Bollinger (1h)", f"{b * 100:.0f}%", "position inside the bands (100% = upper band); band width "
-                    f"{t['bb_width'] * 100:.0f}% of price" if t.get("bb_width") is not None else "position inside the bands",
+        out.append(("Bollinger (1h)", f"{b * 100:.0f}%", "where the price sits in its usual band (100% = top)"
+                    + (f"; band is {t['bb_width'] * 100:.0f}% of price wide" if t.get("bb_width") is not None else ""),
                     ["bb_pctb", "bb_width"]))
     if t.get("vol_ratio2") is not None:
         v = t["vol_ratio2"]
-        out.append(("Volume", f"{v:.1f}×", "last 2h volume vs the 24h average" + (" — volume spike" if v >= 2 else ""),
-                    ["vol_ratio2"]))
+        out.append(("Volume", f"{v:.1f}×", "last 2 hours vs normal" + (" — volume spike" if v >= 2 else ""), ["vol_ratio2"]))
     if t.get("buy_share4") is not None:
-        out.append(("Buy pressure", f"{t['buy_share4'] * 100:.0f}%", "of the last 4h volume was buying", ["buy_share4"]))
+        out.append(("Buying share", f"{t['buy_share4'] * 100:.0f}%", "of the last 4 hours' trading was buying", ["buy_share4"]))
     if t.get("buyers2") is not None:
-        out.append(("Activity", f"{t['buyers2']} / {t['sellers2']}", "unique buyers / sellers in the last 2h",
+        out.append(("Activity", f"{t['buyers2']} / {t['sellers2']}", "different buyers / sellers in the last 2 hours",
                     ["buyers2", "sellers2"]))
     if t.get("profit3") is not None:
-        out.append(("Holders in big profit", f"{t['profit3']:.0f}%", "of supply sits with holders up ≥3x (or who got tokens "
-                    "for free) — potential sellers", ["profit3"]))
+        out.append(("Holders in big profit", f"{t['profit3']:.0f}%", "of all coins sit with holders up 3x or more (or who got "
+                    "them free) — possible sellers", ["profit3"]))
     if t.get("early") is not None:
-        out.append(("First-hour wallets", f"{t['early']:.1f}%", "of supply is still held by wallets that came in during "
-                    "the first hour (snipers/insiders)", ["early"]))
+        out.append(("First-hour wallets", f"{t['early']:.1f}%", "of all coins are still with wallets that bought in the first "
+                    "hour (snipers, insiders)", ["early"]))
     if t.get("liq_chg6") is not None:
         c = t["liq_chg6"]
-        out.append(("Liquidity change 6h", pct(c), "LPs are pulling liquidity" if c <= -0.15 else
-                    "LPs are adding liquidity" if c >= 0.15 else "stable", ["liq_chg6"]))
+        out.append(("Liquidity change (6h)", pct(c), "LPs are pulling money out" if c <= -0.15 else
+                    "LPs are adding money" if c >= 0.15 else "stable", ["liq_chg6"]))
     if t.get("new6") is not None:
-        out.append(("New buyers", f"{t['new6']:.1f}×", "new wallets buying in the last 6h vs the 48h norm", ["new6"]))
+        out.append(("New buyers", f"{t['new6']:.1f}×", "new wallets buying in the last 6 hours vs normal", ["new6"]))
     return out
 
 
@@ -1075,79 +1246,72 @@ def tech_section(a):
     if not rows:
         return
     ft = a.get("feature_test")
-    section("Technical view", "Classic indicators plus on-chain holder data. The tag shows whether the item predicted "
-                              "≥30% dumps within 8h when tested on the sample coins.")
+    section("Chart and on-chain indicators", "Classic chart indicators plus holder data. The tag shows whether it helped "
+                                             "predict crashes when we tested it on the sample coins.")
     cells = []
     for label, val, expl, feats in rows:
-        tag = ('<span class="hl-tag yes">useful signal</span>' if any(useful(ft, n) for n in feats)
-               else '<span class="hl-tag">context only</span>') if ft else ""
+        tag = ('<span class="hl-tag yes">predicts crashes</span>' if any(useful(ft, n) for n in feats)
+               else '<span class="hl-tag">info only</span>') if ft else ""
         cells.append(f'<div class="k">{h(label)}</div><div class="v"><b>{h(val)}</b> · {h(expl)}{tag}</div>')
     ui('<div class="hl-kv">' + "".join(cells) + "</div>")
-    ui('<p class="hl-small">"Useful signal" = across the sample coins it ranked dump moments above calm ones '
-       '(median AUC ≥0.58 or ≤0.42) in the same direction for at least 70% of coins. Classic indicators like RSI, EMA '
-       'and VWAP mostly did not; holder profit, activity, volume spikes and volatility did.</p>')
     trend = rows[0][1] if rows and rows[0][0].startswith("Trend") else None
-    parts = []
+    txt = (f"The chart is <b>{trend.lower()}</b>. " if trend else "")
     if a["factors"]:
-        parts.append("pushing risk up: " + "; ".join(h(x) for x in a["factors"]))
-    if a["calm_factors"]:
-        parts.append("keeping it down: " + "; ".join(h(x) for x in a["calm_factors"]))
-    txt = ("; ".join(parts) + ". " if parts else "") + (f"Chart trend (1h): {trend.lower()}. " if trend else "")
-    txt += "Treat RSI, EMA and VWAP as context, not as a reason to open or skip."
-    conclude(txt[0].upper() + txt[1:], "warn" if a["factors"] else "info")
+        txt += f"The indicator that worries the model most: {h(a['factors'][0])}. "
+    txt += ('Classic signals like RSI and moving averages did not predict crashes in our tests ("info only"), so don\'t open '
+            "or skip just because of them.")
+    conclude(txt, "warn" if a["factors"] else "info")
 
 
 def sleep_section(a):
-    lvl = a["level"]
-    section(f"If you sleep {a['sleep_h']:g} hours")
-    items = []
-    if a["hist_rate"] is not None:
-        items.append(("info", f"In its own history, this coin fell ≥30% within {a['sleep_h']:g}h {a['hist_rate'] * 100:.0f}% "
-                              "of the time."))
-    cal = a["calib"]
-    if cal:
-        items.append(("info", f"In {short_names(a['ref_names'])}, whenever the verdict was {VERDICTS[lvl]}: a ≥30% drop within "
-                              f"{cal['sleep_h']:g}h happened {cal['p30'] * 100:.0f}% of the time, ≥50% {cal['p50'] * 100:.0f}%."))
-    rng = "full range" if a["range_pct"] <= 0 else f"a ±{a['range_pct']:g}% range"
+    pos, hours = a["position_usd"], f"{a['sleep_h']:g} hours"
+    section(f"If you sleep {hours}")
+    rng = "full range" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}% range"
     d30, d50 = a["sims"][1], a["sims"][2]
-    items.append(("info", f"If price drops 30% while you sleep, your LP ({rng}) loses about {pct(d30[1] - 1)}; if it drops "
-                          f"50%, about {pct(d50[1] - 1)} (in {pair_unit(a)})."))
+    items = [("info", f"If the price falls 30% while you sleep, your {dollars(pos)} in a {rng} becomes about "
+                      f"{dollars(pos * d30[1])} ({usd_of(pos * (d30[1] - 1))}). If it falls 50%: about {dollars(pos * d50[1])}.")]
+    if a["hist_rate"] is not None:
+        items.append(("info", f"In its own history, this coin fell 30%+ within {hours} {a['hist_rate'] * 100:.0f}% of the time."))
     items += [("info", line) for line in a["info"]]
     bullets(items)
     rec = a.get("best_range")
-    plan = "full-range LP" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}% LP"
-    txt = f"A 30% drop while you sleep costs your {plan} about {pct(d30[1] - 1)} and a 50% drop about {pct(d50[1] - 1)}"
+    txt = f"A 30% drop would cost your {rng} about {usd_of(pos * (d30[1] - 1))}"
+    extra = ""
     if rec and not rg.is_full(rec["best"]["range"]):
-        b30, b50 = (float(rg.lp_values(np.array([x]), rec["best"]["range"])[0]) - 1 for x in (0.7, 0.5))
-        txt += f"; with the best range ({h(rec['best']['label'])}) about {pct(b30)} and {pct(b50)}"
-    conclude(txt + ". Size the position so that loss is acceptable, and keep the alarm on.",
+        b30 = float(rg.lp_values(np.array([0.7]), rec["best"]["range"])[0]) - 1
+        txt += f", or about {usd_of(pos * b30)} with the best range ({h(rec['best']['label'])})"
+        if b30 < d30[1] - 1:
+            extra = (" The best range loses more in a big drop, but big drops were rare in moments like this, and that is "
+                     "already counted in its average result.")
+    conclude(txt + "." + extra + " Only put in an amount you can lose, and keep the alarm on.",
              "bad" if d30[1] - 1 <= -0.25 else "warn")
-    with st.expander("LP value simulation table"):
-        table(["Price move", f"LP {rng}", "LP full range", f"Holding {pair_unit(a)}"],
-              [[f"{d * 100:.0f}%", (pct(v - 1), "neg"), (pct(full - 1), "neg"), "0%"] for d, v, full in a["sims"]])
+    with st.expander("LP value table"):
+        table(["Price move", f"Your {rng}", "Full range", f"Just holding {pair_unit(a)}"],
+              [[f"{d * 100:.0f}%", (dollars(pos * v), "neg"), (dollars(pos * full), "neg"), dollars(pos)]
+               for d, v, full in a["sims"]])
 
 
 def render(a):
-    usd, f, lvl, qu = a["usd"], a["now"], a["level"], a["quote"]
-    ui(f'<div class="hl-card hl-verdict {LEVEL_CLASS[lvl]}"><div class="t">{ICON[lvl]} {h(TITLE[lvl])}</div>'
-       f'<div class="s">{h(a["advice"])}</div></div>')
+    usd, f, qu = a["usd"], a["now"], a["quote"]
+    decision_card(a)
     if a["breakout"]:
         ui(f'<div class="hl-note">{h(a["breakout"])}</div>')
-
     fdv = f["px"] * a["supply"]
     off = f["px"] / f["ath"] - 1
     u = a["usdg"] or {}
     main = u.get("main")
-    liq = (("USDG pool liquidity", f"${compact(u['depth'])}", "", f"fee {main['fee'] / 1e4:g}% · age {f['age_h'] / 24:.1f} days")
-           if main else ("Pool liquidity", f"{compact(f['eth_res'])} {a['quote']}", "", f"age {f['age_h'] / 24:.1f} days"))
+    liq = (("USDG pool size", f"${compact(u['depth'])}", "", f"fee {main['fee'] / 1e4:g}% · coin age {f['age_h'] / 24:.1f} days")
+           if main else ("Pool size", f"{compact(f['eth_res'])} {a['quote']}", "", f"coin age {f['age_h'] / 24:.1f} days"))
     tiles([("Market cap", money(fdv, usd, qu), "", None),
-           ("From ATH", pct(off), sign_class(off), f"ATH {money(f['ath'] * a['supply'], usd, qu)}"),
+           ("From all-time high", pct(off), sign_class(off), f"ATH {money(f['ath'] * a['supply'], usd, qu)}"),
            ("Last 4 hours", pct(f["r4h"]), sign_class(f["r4h"]), None), liq])
     ui(f'<div class="hl-meta">{h(a["name"])} ({h(a["symbol"])}) · {h(a["address"])} · data up to {when(f["t"])} UTC</div>')
-    summary_section(a)
     usdg_section(a)
     risk_section(a)
     reasons_section(a)
+    move_section(a)
+    holders_section(a)
+    flow_section(a)
     liquidity_section(a)
     range_section(a)
     analog_section(a)
@@ -1158,8 +1322,8 @@ def render(a):
     ch, df = chart(a)
     st.altair_chart(ch, theme=None)
     ui('<div class="hl-legend">' + "".join(f'<span style="--c:{c}">{v}</span>' for v, c in STATUS.items())
-       + '</div><p class="hl-small">Top: market cap. Middle: whales selling (+) or buying (−) over 6h, % of supply. '
-       'Bottom: the verdict the tool would have given every 5 minutes.</p>')
+       + '</div><p class="hl-small">Top: market cap. Middle: big holders selling (+) or buying (-) over 6 hours, as % of all '
+       'coins. Bottom: the verdict this tool would have given at each moment.</p>')
     rows72 = a["rows"]
     if rows72:
         chg = rows72[-1]["px"] / rows72[0]["px"] - 1
@@ -1167,21 +1331,21 @@ def render(a):
         bad_share = sum(r["level"] == 2 for r in rows72) / len(rows72)
         wn = rows72[-1]["wn6"]
         off = 1 - rows72[-1]["px"] / hi72
-        txt = (f"Over the last {(rows72[-1]['t'] - rows72[0]['t']) / 3600:.0f}h price moved {pct(chg)} and "
-               + (f"now sits {off * 100:.0f}% below the period high." if off >= 0.005 else "is at the period high.")
-               + f" The tool would have said AVOID "
-               f"{bad_share * 100:.0f}% of the time. Whales {'sold' if wn > 0 else 'bought'} {abs(wn):.2f}% of supply (net) in the last 6h.")
+        txt = (f"In the last {(rows72[-1]['t'] - rows72[0]['t']) / 3600:.0f} hours the price moved {pct(chg)} and "
+               + (f"is now {off * 100:.0f}% below the high of that period." if off >= 0.005 else "is at the high of that period.")
+               + f" The tool would have said AVOID {bad_share * 100:.0f}% of that time. Big holders "
+               f"{'sold' if wn > 0 else 'bought'} {abs(wn):.2f}% of all coins (net) in the last 6 hours.")
         conclude(txt, "bad" if wn >= 1.5 else "warn" if bad_share >= 0.3 else "info")
     with st.expander("Chart data (table, last 24h)"):
         rows = [[when(r["t"]), money(r["px"] * a["supply"], usd, qu), (f"{r['wn6']:+.2f}%", sign_class(-r["wn6"])),
                  VERDICTS[r["level"]]] for r in a["rows"][::-1][:288]]
-        table(["Time (UTC)", "Market cap", "Whales 6h (+sold/−bought)", "Verdict"], rows, tall=True)
+        table(["Time (UTC)", "Market cap", "Big holders 6h (+sold / -bought)", "Verdict"], rows, tall=True)
 
     sleep_section(a)
 
     section("Alarm while the position is open")
-    ui('<p class="hl-small" style="margin-bottom:6px">Get woken up when the verdict turns AVOID '
-       '(set TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID):</p>'
+    ui('<p class="hl-small" style="margin-bottom:6px">Get a Telegram message when the verdict turns AVOID '
+       '(set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID first):</p>'
        f'<div class="hl-code">python -m dump_alert.watch --token {h(a["address"])}</div>')
 
     with st.expander("Technical details: all filters"):
@@ -1192,9 +1356,9 @@ def render(a):
         table(["", "Filter", "Current value"], rows)
         rule = VERDICTS[a["rule_level"]]
         mp = f'{a["model_p"] * 100:.0f}%' if a["model_p"] is not None else "n/a"
-        ui(f'<p class="hl-small">Rules alone would say <b>{rule}</b>; model estimate {mp}; mode '
-           f'{"conservative" if a["mode"] == "conservative" else "balanced"}. K = hard filter (any K → at least CAUTION, '
-           'AVOID in conservative mode). L = soft filter (two or more → CAUTION in the rules).</p>')
+        ui(f'<p class="hl-small">Rules alone would say <b>{rule}</b>; model {mp}; mode '
+           f'{"conservative" if a["mode"] == "conservative" else "balanced"}. K = strong danger sign (any K → at least CAUTION, '
+           'AVOID in conservative mode). L = warning (two or more → CAUTION in the rules).</p>')
         pat = a["pattern"]
         if pat:
             ui(f'<p class="hl-small">Price pattern: {h(STATES[pat["state"]])}. High {h(money(pat["h1"] * a["supply"], usd, qu))} '
@@ -1209,33 +1373,33 @@ def main():
     names = [t["symbol"] for t in (ref or {}).get("tokens", [])]
     ui('<div class="hl-head"><span class="hl-logo">◆ LP Guard</span><span class="hl-pill">Robinhood Chain</span></div>'
        '<div class="hl-title">Check a coin before you LP and sleep</div>'
-       '<p class="hl-sub">Paste a contract address. The coin is compared with how '
-       f'{h(short_names(names, 4)) if names else "the reference coins"} looked right before they crashed, with similar '
-       'moments in all sample coins, and checked for liquidity, supports, whales and technicals.</p>')
+       '<p class="hl-sub">Paste a coin\'s contract address. You get one clear answer — open, be careful, or wait — plus the '
+       f'best LP range, who holds the coin and where money is flowing, all learned from {len(names) or 24} past coins.</p>')
     keys = api_keys()
     with st.form("check"):
         ca = st.text_input("Contract address", placeholder="0x…")
         c1, c2 = st.columns(2)
-        rng = c1.slider("Your planned LP range (±%)", 0, 100, 20, step=5, help="0 = full range")
+        rng = c1.slider("Your planned LP range (±%)", 0, 100, 20, step=5,
+                        help="How far below and above today's price your range goes. 0 = full range.")
         sleep_h = c2.slider("Hours you'll be away", 2, 12, 8)
         c3, c4 = st.columns(2)
         position = c3.number_input("Position size (USD)", min_value=10, max_value=10_000_000, value=1000, step=100,
-                                   help="Used to estimate your share of the pool's fees: a big position in a thin pool "
-                                        "earns less per dollar, because your own liquidity dilutes the fees.")
-        conservative = c4.toggle("Conservative mode", help="Use the stricter of the rules and the model. In testing on "
-                                 "busy coins it let fewer dumps slip through as OK (3.5% vs 8.4%), but says OK far less often.")
+                                   help="How much you plan to put in. Used to show results in dollars. In a small pool, "
+                                        "a big position earns less per dollar because you share the fees with yourself.")
+        conservative = c4.toggle("Extra careful mode", help="Says OK less often. In tests on busy coins, fewer crashes "
+                                 "slipped through as OK (3.5% instead of 8.4%).")
         at = st.text_input("Rewind to a past time (optional, UTC)", placeholder="2026-10-10 15:40",
-                           help="Judge the coin as if you checked it at that moment — useful to test the verdict before an old dump.")
+                           help="See what the tool would have said at that moment, e.g. right before an old dump.")
         go = st.form_submit_button("Check now", type="primary", width="stretch")
-    with st.expander("How to read this"):
+    with st.expander("How to read the answer"):
         ui('<ul class="hl-list">'
-           '<li class="bad"><b>AVOID</b>: the model sees a 35%+ chance of a ≥30% drop while you sleep. In testing, a dump '
-           'followed about half of these.</li>'
-           '<li class="warn"><b>CAUTION</b>: a 15–35% chance, or a hard danger sign is on (whales selling, price just '
-           'crashed, back near the ATH after a dip, or the token just launched).</li>'
-           '<li class="good"><b>OK</b>: under 15%. Not a guarantee — coins can crash without warning. Keep an alarm on.</li>'
-           '<li class="info">The first check of a coin takes a few minutes to pull its on-chain data; later checks are fast. '
-           'Coins without a Uniswap pool (still on a bonding curve) cannot be judged yet.</li></ul>')
+           '<li class="bad"><b>🚫 Don\'t open</b>: high chance (35%+) that the price falls 30% or more while you sleep. In '
+           'tests, about half of these really crashed.</li>'
+           '<li class="warn"><b>⚠️ Risky</b>: a 15–35% chance, or a strong danger sign (big holders selling, price just '
+           'crashed, back at its old high, or the coin just launched).</li>'
+           '<li class="good"><b>✅ OK</b>: under 15%. Not a guarantee — coins can crash without warning, so keep the alarm on.'
+           '</li><li class="info">The first check of a coin takes a few minutes; after that it is fast. Coins that are still '
+           'on a bonding curve (no Uniswap pool yet) cannot be checked.</li></ul>')
     if not go:
         return
     address = ca.strip().lower()

@@ -282,6 +282,8 @@ def fee_yield(tok, m, t, usd, position_usd):
         notes.append("the pool fee is dynamic (set by a hook), so a 1% fee is assumed")
     else:
         r = rate * vol / total
+    if book and book.get("ts", 0) > t + 3600:  # mode mundur waktu: likuiditas hari ini, volume masa lalu
+        notes.append("rewind mode uses today's pool size with that day's trading, so this fee level is rough")
     pool = pool or total
     share = min(10.0, position_usd / pool) if pool else 0.0
     return {"r": r, "vol24": vol, "tvl": total, "tvl_pool": pool, "fee": fee, "rate": rate, "share": share,

@@ -648,29 +648,29 @@ def reasons(hits, f, rate, flags):
     pat = f.get("pattern")
     main, minor = [], []
     if hits["K5"]:
-        main.append(f"Price came back near its ATH after a {pct(pat['low'] / pat['h1'] - 1)} dip. "
-                    "This exact pattern showed up right before CRADLE and PULP crashed.")
+        main.append(f"Price came back to its all-time high after a {pct(pat['low'] / pat['h1'] - 1)} dip. CRADLE and PULP "
+                    "crashed right after this same pattern.")
     if hits["K6"]:
-        main.append(f"Price failed to break the ATH and is already {pct(f['px'] / pat['retest'] - 1)} off the retest high"
-                    + (", and has broken below support." if pat["state"] == "BREAKDOWN" else "."))
+        main.append(f"Price tried to break its all-time high and failed; it is already {pct(f['px'] / pat['retest'] - 1)} "
+                    "below that try" + (" and broke through its floor." if pat["state"] == "BREAKDOWN" else "."))
     if hits["K1"]:
-        main.append(f"Whales are net-selling: {f['wn6']:.1f}% of supply in the last 6 hours.")
+        main.append(f"Big holders are selling: {f['wn6']:.1f}% of all coins sold (net) in the last 6 hours.")
     if hits["K2"]:
-        main.append(f"Price already dropped {pct(f['r4h'])} in 4 hours; falling knives usually keep falling.")
+        main.append(f"Price already fell {pct(f['r4h'])} in 4 hours. Coins falling this fast usually keep falling.")
     if hits["K3"]:
-        main.append(f"Price is near its 24h high after a {f['ext24'] + 1:.1f}x run; a prime spot for profit-taking.")
+        main.append(f"Price is near its 24h high after a {f['ext24'] + 1:.1f}x run. Holders often take profit here.")
     if hits["K4"]:
-        main.append("The token launched less than 2 hours ago (snipers are still dumping).")
+        main.append("The coin launched less than 2 hours ago. Early buyers are still selling.")
     if hits["L1"]:
-        minor.append(f"Whales net-sold {f['wn1']:.1f}% of supply in the last hour.")
+        minor.append(f"Big holders sold {f['wn1']:.1f}% of all coins in the last hour.")
     if hits["L2"]:
-        minor.append("Price has been swinging wildly in the last few hours.")
+        minor.append("Price is swinging very hard right now.")
     if hits["L3"]:
-        minor.append(f"Price is up {pct(f['r4h'])} in 4 hours (vertical pump).")
+        minor.append(f"Price is up {pct(f['r4h'])} in 4 hours (a very steep pump).")
     if hits["L4"]:
-        minor.append(f"New large wallets bought {f['fresh']:.1f}% of supply in 2 hours; they usually flip fast.")
+        minor.append(f"New big wallets bought {f['fresh']:.1f}% of all coins in 2 hours. They often sell quickly.")
     if hits["L5"]:
-        minor.append(f"Historically this token often dropped ≥30% within 8 hours ({rate * 100:.0f}% of the time).")
+        minor.append(f"In its own history, this coin fell 30%+ within 8 hours {rate * 100:.0f}% of the time.")
     if hits["L6"]:
         minor.append("At launch: " + "; ".join(flags) + ".")
     return main, minor
@@ -682,55 +682,58 @@ def breakout_note(f, ref, address):
         return None
     cs = [c for c in (ref or {}).get("crashes", []) if c["address"] != address]
     n = sum(1 for c in cs if c.get("ath4h_break"))
-    s = (f"📈 NEW ATH on the 4h chart: price is {pct(f['px'] / f['ath4h'] - 1)} above the highest previous 4h close. "
-         "Because of that, the ATH-retest pattern alone no longer counts as a hard danger sign.")
+    s = f"📈 New high on the 4h chart: price is {pct(f['px'] / f['ath4h'] - 1)} above the best 4h close so far."
     if cs:
-        s += f" Careful though: {n} of {len(cs)} reference crashes happened right after a 4h ATH breakout like this."
+        s += (f" Breakouts can keep going, but {n} of {len(cs)} big crashes in the sample coins started right after a "
+              "breakout like this.")
     return s
 
 
+def _age(h):
+    return f"{h:.0f} hours" if h < 48 else f"{h / 24:.0f} days"
+
+
+# kalimat sederhana untuk faktor model (yang menaikkan risiko / yang menurunkan risiko)
 FACTOR_TEXT = {
-    "off_ath": lambda x: f"price is near its ATH ({pct(x)} from it)" if x > -0.3 else f"price is {pct(x)} from its ATH",
-    "ext24": lambda x: f"price is {x + 1:.1f}x its 24h low",
-    "r4h": lambda x: f"price moved {pct(x)} in 4h",
-    "vol6": lambda x: f"price is very volatile ({x:.1f}% per 5 minutes)",
-    "fresh": lambda x: f"new big wallets bought {x:.1f}% of supply in 2h",
-    "wn6": lambda x: f"whales net {'sold' if x > 0 else 'bought'} {abs(x):.1f}% of supply in 6h",
-    "log_age": lambda x: f"the coin is young ({math.expm1(x):.0f}h old)",
-    "buyers2": lambda x: f"very hot trading ({x:.0f} unique buyers in 2h)",
-    "sellers2": lambda x: f"many wallets selling ({x:.0f} unique sellers in 2h)",
-    "profit3": lambda x: f"{x:.0f}% of supply sits with holders up ≥3x",
-    "early": lambda x: f"{x:.0f}% of supply is still with first-hour wallets",
-    "vol_ratio2": lambda x: f"volume is {x:.1f}× its 24h average",
-    "liq_share": lambda x: f"the pools hold only {x:.1f}% of supply (thin vs market cap)",
-    "ath4h_break": lambda x: "new ATH on the 4h chart",
-    "pat_retest": lambda x: "ATH retest pattern",
-    "pat_gagal": lambda x: "failed ATH retest",
-    "top_buy4": lambda x: f"buying is spread over many wallets (top buyer {x * 100:.0f}% of 4h buys)",
-    "bb_width": lambda x: f"wide Bollinger bands ({x * 100:.0f}% of price)",
-    "rsi1h": lambda x: f"RSI 1h at {x:.0f}",
-    "hour_sin": lambda x: "time of day (historically riskier hours)",
-    "hour_cos": lambda x: "time of day (historically riskier hours)",
+    "off_ath": lambda x: f"price is right at its all-time high ({pct(x)})" if x > -0.3 else f"price is {pct(x)} below its all-time high",
+    "ext24": lambda x: f"price already went {x + 1:.1f}x from its 24h low",
+    "r4h": lambda x: f"price moved {pct(x)} in the last 4 hours",
+    "vol6": lambda x: f"price is swinging a lot ({x:.1f}% per 5 minutes)",
+    "fresh": lambda x: f"new big wallets bought {x:.1f}% of all coins in 2 hours",
+    "wn6": lambda x: f"big holders {'sold' if x > 0 else 'bought'} {abs(x):.1f}% of all coins in 6 hours",
+    "log_age": lambda x: f"the coin is still young ({_age(math.expm1(x))} old)",
+    "buyers2": lambda x: f"trading is very hot ({x:.0f} buyers in 2 hours)",
+    "sellers2": lambda x: f"many wallets are selling ({x:.0f} sellers in 2 hours)",
+    "profit3": lambda x: f"{x:.0f}% of all coins sit with holders who are up 3x or more (they may take profit)",
+    "early": lambda x: f"first-hour buyers (snipers) still hold {x:.0f}% of all coins",
+    "vol_ratio2": lambda x: f"trading volume is {x:.1f}× its normal level",
+    "liq_share": lambda x: f"little liquidity for its size (the pools hold only {x:.1f}% of all coins)",
+    "ath4h_break": lambda x: "it just made a new high on the 4h chart",
+    "pat_retest": lambda x: "price came back to its old high (a common top pattern)",
+    "pat_gagal": lambda x: "price failed to break its old high",
+    "top_buy4": lambda x: f"buying comes from many small wallets (the biggest buyer made {x * 100:.0f}% of 4h buys)",
+    "bb_width": lambda x: f"price is moving in a wide band ({x * 100:.0f}% of price)",
+    "rsi1h": lambda x: f"RSI (1h) is {x:.0f}",
+    "hour_sin": lambda x: "this time of day has seen more crashes",
+    "hour_cos": lambda x: "this time of day has seen more crashes",
 }
-
-
 CALM_TEXT = {
-    "off_ath": lambda x: f"price is {pct(x)} from its ATH",
+    "off_ath": lambda x: f"price is {pct(x)} below its all-time high",
     "ext24": lambda x: f"price is only {x + 1:.1f}x its 24h low",
-    "r4h": lambda x: f"price moved {pct(x)} in 4h",
-    "vol6": lambda x: f"volatility is moderate ({x:.1f}% per 5 minutes)",
-    "log_age": lambda x: f"the coin is {math.expm1(x) / 24:.0f} days old",
-    "buyers2": lambda x: f"trading is calm ({x:.0f} unique buyers in 2h)",
-    "sellers2": lambda x: f"few wallets selling ({x:.0f} in 2h)",
-    "liq_share": lambda x: f"the pools hold {x:.1f}% of supply",
-    "profit3": lambda x: f"only {x:.0f}% of supply sits with holders up ≥3x",
-    "early": lambda x: f"first-hour wallets hold only {x:.0f}% of supply",
-    "top_buy4": lambda x: f"the top buyer made {x * 100:.0f}% of 4h buys",
-    "bb_width": lambda x: f"narrow Bollinger bands ({x * 100:.0f}% of price)",
-    "vol_ratio2": lambda x: f"volume is {x:.1f}× its 24h average",
-    "fresh": lambda x: f"new big wallets bought only {x:.1f}% in 2h",
-    "wn6": lambda x: f"whales net {'sold' if x > 0 else 'bought'} {abs(x):.1f}% of supply in 6h",
-    "rsi1h": lambda x: f"RSI 1h at {x:.0f}",
+    "r4h": lambda x: f"price moved {pct(x)} in 4 hours",
+    "vol6": lambda x: f"price is fairly calm ({x:.1f}% per 5 minutes)",
+    "log_age": lambda x: f"the coin is {_age(math.expm1(x))} old",
+    "buyers2": lambda x: f"trading is calm ({x:.0f} buyers in 2 hours)",
+    "sellers2": lambda x: f"few wallets are selling ({x:.0f} in 2 hours)",
+    "liq_share": lambda x: f"good liquidity for its size (the pools hold {x:.1f}% of all coins)",
+    "profit3": lambda x: f"only {x:.0f}% of all coins sit with holders up 3x or more",
+    "early": lambda x: f"first-hour buyers hold only {x:.0f}% of all coins",
+    "top_buy4": lambda x: f"the biggest buyer made {x * 100:.0f}% of 4h buys",
+    "bb_width": lambda x: f"price is moving in a narrow band ({x * 100:.0f}% of price)",
+    "vol_ratio2": lambda x: f"trading volume is {x:.1f}× its normal level",
+    "fresh": lambda x: f"new big wallets bought only {x:.1f}% in 2 hours",
+    "wn6": lambda x: f"big holders {'sold' if x > 0 else 'bought'} {abs(x):.1f}% of all coins in 6 hours",
+    "rsi1h": lambda x: f"RSI (1h) is {x:.0f}",
 }
 
 
@@ -848,18 +851,22 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
                         resistance=levels.resistances(tok, f["t"], f["px"]))
 
     best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd)
+    from . import holders as hold
+    top = hold.top_holders(tok, f["t"])
+    flow_now = hold.money_flow(tok, f["t"])
+    move = expected_move(tok, level, f["t"], sleep_h, ref)
 
     advice = {2: "Don't open an LP now. Wait for the danger signs to clear, then check again.",
               1: "High risk. If you still go in: small size, wide range, and keep an alarm on.",
               0: "Lower risk, not zero. Keep an alarm on while the position is open."}[level]
     main_reasons, minor_reasons = reasons(hits, f, rate, flags)
     if model_p is not None:
-        why = (" Main drivers: " + "; ".join(factors) + ".") if factors else ""
-        line = f"The model puts the chance of a ≥30% drop within {sleep_h:g}h at {model_p * 100:.0f}%.{why}"
+        why = (" Main reasons: " + "; ".join(factors) + ".") if factors else ""
+        line = f"Our model gives a {model_p * 100:.0f}% chance of a 30%+ drop in the next {sleep_h:g} hours.{why}"
         (main_reasons if model_p >= MODEL_T[0] else minor_reasons).insert(0, line)
         if rule_level == 2 and level < 2 and mode == "balanced":
-            main_reasons.append("A hard safety filter is on, so the verdict is at least CAUTION even though the model's "
-                                "estimate is lower.")
+            main_reasons.append("A strong danger sign is on, so the verdict is at least CAUTION even though the "
+                                "model's number is low.")
     if bumped:
         b = compare["best"]
         main_reasons.insert(0, f"Conditions look like {b['symbol']} right before its {pct(b['drop'])} crash "
@@ -874,6 +881,7 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "reasons": main_reasons, "minor_reasons": minor_reasons,
         "breakout": breakout_note(f, ref, tok.address),
         "range_advice": ra, "range_plan": plan, "best_range": best_range, "position_usd": position_usd,
+        "holders": top, "holder_summary": hold.holder_summary(top), "flow": flow_now, "move": move,
         "ref_names": [x["symbol"] for x in (ref or {}).get("tokens", []) if x["address"] != tok.address],
         "similarity_test": [x for x in (ref or {}).get("similarity_test", []) if x["address"] != tok.address],
         "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "sleep_h": sleep_h,
@@ -881,6 +889,26 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "levels": lv, "tech": tview, "analogs": analog, "model_p": model_p,
         "feature_test": (ref or {}).get("feature_test"), "model": (ref or {}).get("dump_model"),
     }
+
+
+def expected_move(tok, level, t, sleep_h, ref):
+    """Seberapa jauh harga biasanya turun & naik selama jam tidur (kuantil 50/80/90%): dari riwayat koin sendiri
+    (jendela yang sudah selesai, kalau >= 100) dan dari koin sampel dengan vonis yang sama."""
+    dd, ru = forward_dd(tok, sleep_h), forward_rise(tok, sleep_h)
+    own_d, own_r, n = [0] * 101, [0] * RISE_BINS, 0
+    for tt, d, r in zip(tok._pt, dd, ru):
+        if d is not None and r is not None and tt + sleep_h * H <= t:
+            own_d[drop_bin(d)] += 1
+            own_r[rise_bin(r)] += 1
+            n += 1
+    out = []
+    peer_d = peer_hist(ref, "drops", tok.address, level, sleep_h, 101)
+    peer_r = peer_hist(ref, "rises", tok.address, level, sleep_h, RISE_BINS)
+    for name, hd, hr, cnt in (("This coin's history", own_d, own_r, n), ("Sample coins, same verdict", peer_d, peer_r, sum(peer_d))):
+        if cnt >= (100 if name.startswith("This") else 1) and sum(hd) and sum(hr):
+            out.append({"source": name, "n": cnt, "down": {q: hist_quantile(hd, q / 100) for q in (50, 80, 90)},
+                        "up": {q: hist_quantile(hr, q / 100) for q in (50, 80, 90)}})
+    return out
 
 
 _RANGES = []

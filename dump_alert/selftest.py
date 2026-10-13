@@ -268,6 +268,13 @@ def main():
     assert [e[1] for e in net_events(lp_rem, {POOL}, set(), U)] == ["buy"], "tanpa tanda LP tetap terbaca beli"
 
     tok = Token(ds)
+    # holder terbesar & aliran uang: urut dari yang terbesar, penerima claim = 'free', dua whale keluar = -2% supply
+    from . import holders
+    top = holders.top_holders(tok, tok._pt[-1], 5)
+    assert all(a_["share"] >= b_["share"] for a_, b_ in zip(top, top[1:])) and top[-1]["free"], top
+    fl = {w["hours"]: w for w in holders.money_flow(tok, tok._pt[-1])}
+    assert abs(fl[24]["whale_net"] + 0.02) < 1e-9 and abs(fl[24]["net"] - (fl[24]["buy"] - fl[24]["sell"])) < 1e-12, fl[24]
+    assert fl[1]["sellers"] == 0 and fl[24]["sellers"] == 2, fl
     risk = launch_risk(tok)
     assert abs(risk["snipe_60s_pct_pool"] - 60) < 1e-6, risk
     assert abs(risk["recv_24h_pct_supply"] - 10) < 1e-6, risk
