@@ -851,11 +851,14 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
                         resistance=levels.resistances(tok, f["t"], f["px"]))
 
     upper_pct = range_pct if upper_pct is None else upper_pct
-    best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct, stay_target)
+    own = own_windows(tok, f["t"], sleep_h)
+    best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct, stay_target,
+                               own)
     from . import holders as hold
     top = hold.top_holders(tok, f["t"])
     flow_now = hold.money_flow(tok, f["t"])
     move = expected_move(tok, level, f["t"], sleep_h, ref)
+    exits = exit_plan(f, lv, best_range, own, tview, flow_now, ref)
 
     advice = {2: "Don't open an LP now. Wait for the danger signs to clear, then check again.",
               1: "High risk. If you still go in: small size, wide range, and keep an alarm on.",
@@ -882,7 +885,7 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "reasons": main_reasons, "minor_reasons": minor_reasons,
         "breakout": breakout_note(f, ref, tok.address),
         "range_advice": ra, "range_plan": plan, "best_range": best_range, "position_usd": position_usd,
-        "holders": top, "holder_summary": hold.holder_summary(top), "flow": flow_now, "move": move,
+        "holders": top, "holder_summary": hold.holder_summary(top), "flow": flow_now, "move": move, "exits": exits,
         "ref_names": [x["symbol"] for x in (ref or {}).get("tokens", []) if x["address"] != tok.address],
         "similarity_test": [x for x in (ref or {}).get("similarity_test", []) if x["address"] != tok.address],
         "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "upper_pct": upper_pct,
@@ -915,6 +918,55 @@ def expected_move(tok, level, t, sleep_h, ref):
 _RANGES = []
 
 
+# sinyal teknikal saat harga mendekati resistance (diuji di resistance_test): yang membuat resistance lebih sering
+# TEMBUS (momentum) dan yang membuatnya lebih sering MENAHAN harga
+EXIT_SIGNALS = [
+    ("rsi70", "RSI (1h) is 70 or higher", lambda x: (x.get("rsi1h") or 0) >= 70),
+    ("volspike", "Volume is 2x normal or more", lambda x: (x.get("vol_ratio2") or 0) >= 2),
+    ("bb", "Price is at or above the upper Bollinger band", lambda x: (x.get("bb_pctb") or 0) >= 1.0),
+    ("stretch", "Price is 15%+ above its 1h average (EMA20)", lambda x: (x.get("ema_gap") or 0) >= 0.15),
+    ("sellers", "More selling than buying in the last 4 hours", lambda x: x.get("buy_share4") is not None and x["buy_share4"] < 0.5),
+    ("lower_highs", "Chart makes lower highs (1h)", lambda x: (x.get("structure") or 0) == -1),
+]
+HOLD_OK = 0.40   # zona yang dipakai untuk ambil untung: peluang menolak harga (uji) >= 40%
+MIN_TP = 0.08    # level ambil untung paling dekat: +8% dari harga sekarang
+
+
+def exit_plan(f, lv, rec, own, tview, flow, ref):
+    """Tempat exit / ambil untung: zona resistance di atas harga dengan peluang menahan harga (dari uji, sesuai kekuatan
+    zona dan momentum sekarang) dan peluang tersentuh selama jam tidur; level ambil untung = zona terdekat yang cukup
+    kuat; saran batas atas tepat di bawahnya; batas keluar darurat (floor terdekat); dan sinyal teknikal sekarang."""
+    import numpy as np
+    zones, px = list((lv or {}).get("res") or []), f["px"]
+    rt = (ref or {}).get("resistance_test") or {}
+    x = {**(tview or {}), "wn6": f.get("wn6")}
+    mom = levels.momentum(x)
+    peer = (rec or {}).get("peer_max")
+    for z in zones:
+        lo = z["price"] * (1 - levels.ZONE)
+        z["reach_own"] = float(np.mean(own[1] >= lo / px)) if own is not None else None
+        z["reach_peer"] = float(np.mean(peer >= lo / px)) if peer is not None and len(peer) else None
+        ok = [v for v in (z["reach_own"], z["reach_peer"]) if v is not None]
+        z["reach"] = max(ok) if ok else None
+        st = ((rt.get("zones") or {}).get(z["strength"]) or {}).get("momentum" if mom else "calm") or {}
+        z["hold"], z["hold_n"] = st.get("rate"), st.get("n")
+    # ambil untung minimal +8% (ruang untuk fee; level yang lebih dekat praktis berarti keluar sekarang), maksimal +150%
+    near = [z for z in zones if z["up"] * (1 - levels.ZONE) - levels.ZONE >= MIN_TP and z["up"] <= 1.5]
+    target = next((z for z in near if (z["hold"] or 0) >= HOLD_OK), None) or \
+        next((z for z in near if z["strength"] == "strong"), None) or (near[0] if near else None)
+    nxt = next((z for z in zones if target and z["price"] > target["price"]), None)
+    take = None
+    if target:
+        lo = target["price"] * (1 - levels.ZONE)
+        take = {"zone": target, "price": lo, "up": lo / px - 1, "upper_bound": max(1, math.floor((lo / px - 1) * 100) - 1)}
+    floor = next((z for z in (lv or {}).get("zones", []) if z["strength"] in ("strong", "medium")), None)
+    test = rt.get("signals") or {}
+    sig = [{"code": code, "text": text, "on": bool(fn(x)), "test": test.get(code)} for code, text, fn in EXIT_SIGNALS]
+    w4 = next((w for w in flow or [] if w["hours"] == 4), None)
+    return {"zones": zones[:6], "take": take, "next": nxt, "floor": floor, "signals": sig, "momentum": mom,
+            "whales_selling": bool(w4 and w4["whale_net"] <= -0.005), "test": rt.get("zones")}
+
+
 def own_windows(tok, t, sleep_h, min_n=100):
     """(terendah, tertinggi) harga relatif tiap jendela jam tidur yang sudah selesai di riwayat koin ini (None kalau
     kurang dari min_n jendela) — untuk menilai seberapa sering sebuah range kena out-of-range."""
@@ -927,7 +979,8 @@ def own_windows(tok, t, sleep_h, min_n=100):
     return a[:, 0], a[:, 1]
 
 
-def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct=None, stay_target=0.9):
+def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct=None, stay_target=0.9,
+                  own=None):
     """Range paling optimal dari riset ranges.py untuk situasi sekarang (None kalau datanya tidak ada).
     Dikelompokkan dengan vonis 'balanced' (yang dipakai di riset), apa pun mode tampilannya."""
     from . import ranges
@@ -941,7 +994,7 @@ def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, posit
     up = range_pct if upper_pct is None else upper_pct
     user = (float(range_pct), float(up)) if range_pct > 0 else ranges.FULL
     rec = rs.recommend(combine_level(rule_level, model_p, "balanced"), f.get("vol6"), sleep_h, fy["r"], fy["share"],
-                       exclude=me, user=user, own=own_windows(tok, f["t"], sleep_h), target=stay_target)
+                       exclude=me, user=user, own=own, target=stay_target)
     if rec:
         rec["fee"] = fy
     return rec
@@ -1005,9 +1058,12 @@ def support_levels(tok, f, m, ref, max_zones=5):
     depth = levels.book_depth(book, tok.ds["decimals"]) if book and book["ts"] >= f["t"] - 1800 else None
     zones = levels.supports(tok, f["t"], f["px"], depth)
     keep = sorted(sorted(zones, key=lambda z: (-z["score"], -z["price"]))[:max_zones], key=lambda z: -z["price"])
+    from .holders import cost_basis
+    cb = cost_basis(tok, [f["t"]])[f["t"]]
+    res = levels.resistance_zones(tok, f["t"], f["px"], depth, cb)
     return {"zones": keep, "depth": depth, "holes": levels.holes(depth),
             "whale": levels.whale_impact(tok, f["t"], depth), "volume": levels.volume_bands(tok, f["t"], f["px"]),
-            "test": (ref or {}).get("support_test"), "n_pools": len(depth["pools"]) if depth else 0}
+            "test": (ref or {}).get("support_test"), "n_pools": len(depth["pools"]) if depth else 0, "res": res}
 
 
 def report_text(a) -> str:
@@ -1073,6 +1129,11 @@ def report_text(a) -> str:
                   + ("SKIP — no range came out ahead; least bad " if br["skip"] else "")
                   + f"{b['label']}: average {b['mean'] * 100:+.1f}%, 1-in-10 bad case {b['p10'] * 100:+.1f}%, "
                   f"fees {b['fees'] * 100:+.1f}% over {a['sleep_h']:g}h"]
+    ex = a.get("exits") or {}
+    if ex.get("take"):
+        tk = ex["take"]
+        L.append(f"Take profit: +{tk['up'] * 100:.0f}% (just under the {tk['zone']['strength']} resistance at "
+                 f"+{tk['zone']['up'] * 100:.0f}%); upper bound +{tk['upper_bound']}% for an automatic exit")
     lv = a.get("levels") or {}
     dep, k = lv.get("depth"), a["usd"]
     if lv.get("zones") or dep:
@@ -1110,6 +1171,8 @@ def main():
                     help="tulis ulang reference.json (default: token di reference_tokens.txt)")
     ap.add_argument("--support-test", action="store_true",
                     help="uji zona support di token pembanding dan simpan hasilnya ke reference.json")
+    ap.add_argument("--resistance-test", action="store_true",
+                    help="uji zona resistance & sinyal exit di token pembanding dan simpan hasilnya ke reference.json")
     ap.add_argument("--rpc-url")
     args = ap.parse_args()
     if args.support_test:
@@ -1119,6 +1182,16 @@ def main():
             json.dump(ref, fh, separators=(",", ":"), default=_json_default)
         for k, v in ref["support_test"].items():
             print(f"{k:18s} dites {v['n']:5d}  bertahan {v['rate'] * 100 if v['rate'] is not None else 0:5.1f}%")
+        return
+    if args.resistance_test:
+        ref = load_reference() or {}
+        ref["resistance_test"] = levels.summarize_resistance_test(
+            levels.resistance_test([Token(json.load(open(p))) for p in reference_paths()]))
+        with open(REF_PATH, "w") as fh:
+            json.dump(ref, fh, separators=(",", ":"), default=_json_default)
+        for k, v in ref["resistance_test"]["zones"].items():
+            print(f"{k:8s} " + "  ".join(f"{m} {x['rate'] * 100 if x['rate'] is not None else 0:5.1f}% (n={x['n']})"
+                                         for m, x in v.items()))
         return
     if args.build_reference is not None:
         ref = build_reference(args.build_reference or reference_paths(), 8.0)

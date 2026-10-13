@@ -305,7 +305,7 @@ class Ranges:
         return {"best": best, "two_sided": two, "full": full, "mine": mine, "skip": best["growth"] < 0, "safe": safe,
                 "heat": heat, "lo": list(LO), "hi": list(HI), "n": int(mask.sum()),
                 "coins": len({int(x) for x in self.tok[mask]}), "vol_bucket": vb, "level": level,
-                "steps": steps, "r": r, "share": share, "test": self.test,
+                "steps": steps, "r": r, "share": share, "test": self.test, "peer_max": self.P[mask, :steps].max(1),
                 "safe_test": self.safe_test}
 
 

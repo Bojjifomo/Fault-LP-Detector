@@ -154,6 +154,205 @@ def swing_lows(pt, pv, t_now, scale_h):
     return out
 
 
+def swing_highs(pt, pv, t_now, scale_h):
+    """Swing high = harga tertinggi dalam ±scale_h jam, diikuti penurunan >= MIN_BOUNCE dalam 6 jam (ditolak)."""
+    out = []
+    a = bisect.bisect_left(pt, t_now - LOOKBACK_D * 86400)
+    w = scale_h * H
+    for i in range(a, len(pt)):
+        t, p = pt[i], pv[i]
+        if t + w / 2 > t_now:
+            break
+        lo, hi = bisect.bisect_left(pt, t - w), bisect.bisect_right(pt, t + w)
+        if p < max(pv[lo:hi]) or (i > lo and pv[i - 1] == p):
+            continue
+        after = pv[i:bisect.bisect_right(pt, t + 6 * H)]
+        drop = 1 - min(after) / p
+        if drop >= MIN_BOUNCE:
+            out.append((t, p, drop))
+    return out
+
+
+def resistance_zones(tok, now_t, px_now, depth=None, cb=None, max_up=3.0):
+    """Zona resistance di atas harga sekarang (sampai +max_up), dari: swing high 7 hari yang menolak harga >= 10%, ATH,
+    tembok jual LP (pita likuiditas sisi atas yang jauh lebih tebal dari sekitarnya), harga dengan volume tinggi, dan
+    kumpulan holder yang sedang rugi (harga beli rata-rata mereka di zona itu: cenderung menjual saat balik modal).
+    cb = (harga beli rata-rata, saldo) wallet dari holders.cost_basis."""
+    pt, pv = tok._pt, [p[2] for p in tok.prices]
+    k = bisect.bisect_right(pt, now_t)
+    pt, pv = pt[:k], pv[:k]
+    if not pv:
+        return []
+    S, top = tok.supply, px_now * (1 + max_up)
+    highs = []
+    for sc in SWING_SCALES:
+        highs += [(t, p, d) for t, p, d in swing_highs(pt, pv, now_t, sc)]
+    ath = max(pv)
+    cands = [p for _, p, _ in highs]
+    if ath > px_now * 1.01:
+        cands.append(ath)
+    vol = volume_profile(tok.events, pt, pv, now_t)
+    vol_total = sum(vol.values()) or 1.0
+    cands += [1.01 ** b for b, v in sorted(vol.items(), key=lambda x: -x[1])[:5] if v >= 0.05 * vol_total]
+    up = (depth or {}).get("up_band")
+    if up:
+        for u in range(2, min(len(up) - 1, int(max_up * 100))):
+            if up[u] >= max(up[u - 1], up[u + 1]) and local_ratio(depth, u, 1, key="up_band") >= 2:
+                cands.append(px_now * (1 + u / 100))
+    under = None
+    if cb is not None and len(cb[0]):
+        m = cb[0] > px_now
+        under = (cb[0][m], cb[1][m])
+        if len(under[0]):
+            bins = {}
+            for e, b in zip(*under):
+                key = round(math.log(e) / math.log(1.02))
+                bins[key] = bins.get(key, 0.0) + b
+            cands += [1.02 ** key for key, b in bins.items() if b >= 0.01 * S]
+    cands = sorted(c for c in cands if px_now * 1.01 < c <= top)
+    if not cands:
+        return []
+    groups = [[cands[0]]]
+    for c in cands[1:]:
+        if math.log(c / groups[-1][0]) <= 2 * ZONE:
+            groups[-1].append(c)
+        else:
+            groups.append([c])
+    zones = []
+    for g in groups:
+        level = sorted(g)[len(g) // 2]
+        lo, hi = level * (1 - ZONE), level * (1 + ZONE)
+        hits = sorted((t, d) for t, p, d in highs if lo <= p <= hi)
+        touches, last_t = [], None
+        for t, d in hits:
+            if last_t is None or t - last_t >= 2 * H:
+                touches.append(d)
+            last_t = t
+        z = {"price": level, "up": level / px_now - 1, "touches": len(touches),
+             "reject": max(touches) if touches else 0.0, "last_touch": hits[-1][0] if hits else None,
+             "ath": lo <= ath <= hi, "vol_share": sum(x for b, x in vol.items() if lo <= 1.01 ** b <= hi) / vol_total,
+             "under": float(under[1][(under[0] >= lo) & (under[0] <= hi)].sum() / S) if under is not None else None,
+             "wall": None, "buy_usd": None, "wall_ratio": None}
+        u_mid = int(round(z["up"] * 100))
+        if up and u_mid < len(up) - 1:
+            u0, u1 = max(0, int((lo / px_now - 1) * 100)), min(len(up) - 1, int(math.ceil((hi / px_now - 1) * 100)))
+            z["wall"] = depth["up_usd"][u1] - depth["up_usd"][u0]
+            z["buy_usd"] = depth["up_usd"][min(len(up) - 1, max(0, u_mid))]
+            z["wall_ratio"] = local_ratio(depth, u_mid, ZONE * 100, key="up_band")
+        z["age_h"] = (now_t - z["last_touch"]) / H if z["last_touch"] else None
+        zones.append(z)
+    rate_resistances(zones)
+    return zones
+
+
+RES_UNDER = 0.03   # >= 3% supply dipegang holder yang rugi dengan harga beli di zona ini
+TIERS = ("weak", "medium", "strong")
+
+
+def res_tier(touches, under=None, wall_ratio=None):
+    """Kekuatan zona resistance, dikalibrasi di riwayat 24 koin (resistance_test): 3+ penolakan 7 hari = kuat, 1-2 =
+    sedang, tanpa penolakan = lemah; >= 3% supply dipegang holder yang rugi di zona itu naik satu tingkat (terbukti:
+    menolak ±41% vs ±33% tanpa). Tembok jual LP >= 2,5x sekitarnya juga naik satu tingkat (mekanika pool; likuiditas
+    historis tidak tersimpan, belum bisa diuji). ATH sendiri tidak dinaikkan (di koin sampel ATH justru sering tembus)."""
+    tier = 2 if touches >= 3 else 1 if touches >= 1 else 0
+    if (under or 0) >= RES_UNDER or (wall_ratio or 0) >= 2.5:
+        tier = min(2, tier + 1)
+    return tier
+
+
+def rate_resistances(zones):
+    for z in zones:
+        z["score"] = res_tier(z["touches"], z.get("under"), z.get("wall_ratio"))
+        z["strength"] = TIERS[z["score"]]
+
+
+def momentum(x):
+    """Harga datang dengan momentum: RSI 1 jam >= 70 atau volume 2 jam >= 2x normal. Di uji resistance, zona sedang &
+    lemah jauh lebih sering tembus saat momentum (±16-27% menolak vs ±40% saat tenang); zona kuat tetap ±42%."""
+    return (x.get("rsi1h") or 0) >= 70 or (x.get("vol_ratio2") or 0) >= 2
+
+
+RES_SIGNALS = {
+    "rsi70": lambda r: (r.get("rsi1h") or 0) >= 70,
+    "volspike": lambda r: (r.get("vol_ratio2") or 0) >= 2,
+    "bb": lambda r: (r.get("bb_pctb") or 0) >= 1.0,
+    "stretch": lambda r: (r.get("ema_gap") or 0) >= 0.15,
+    "sellers": lambda r: r.get("buy_share4") is not None and r["buy_share4"] < 0.5,
+    "lower_highs": lambda r: (r.get("structure") or 0) == -1,
+    "div": lambda r: (r.get("bear_div") or 0) >= 1,
+}
+
+
+def summarize_resistance_test(rows):
+    """Ringkasan resistance_test untuk reference.json: peluang menolak per kekuatan x momentum, level biasa, dan efek
+    tiap sinyal teknikal (menolak saat sinyal menyala vs mati)."""
+    def stat(rs):
+        n = len(rs)
+        drops = sorted(r["drop"] for r in rs if r["rejected"])
+        return {"n": n, "rate": sum(r["rejected"] for r in rs) / n if n else None,
+                "drop": drops[len(drops) // 2] if drops else None}
+    zones = [r for r in rows if r["kind"] == "zone"]
+    out = {"zones": {}, "signals": {}}
+    for i, name in enumerate(TIERS):
+        rs = [r for r in zones if res_tier(r["touches"], r.get("under")) == i]
+        out["zones"][name] = {"all": stat(rs), "calm": stat([r for r in rs if not momentum(r)]),
+                              "momentum": stat([r for r in rs if momentum(r)])}
+    plain = [r for r in rows if r["kind"] == "plain"]
+    out["zones"]["plain"] = {"all": stat(plain), "calm": stat([r for r in plain if not momentum(r)]),
+                             "momentum": stat([r for r in plain if momentum(r)])}
+    for code, fn in RES_SIGNALS.items():
+        on, off = [r for r in rows if fn(r)], [r for r in rows if not fn(r)]
+        out["signals"][code] = {"on": stat(on), "off": stat(off)}
+    return out
+
+
+def resistance_test(tokens, step_h=2, window_h=24, signals=True):
+    """Uji di riwayat koin sampel: tiap `step_h` jam, zona resistance (price action + holder rugi, tanpa peta likuiditas
+    karena likuiditas historis tidak tersimpan) dibandingkan dengan level biasa +10/+20/+30/+40%. Zona yang disentuh
+    dalam `window_h` jam dihitung 'menolak' kalau 6 jam sesudahnya harga tidak tembus >5% di atas zona dan sempat turun
+    >=5% dari harga sentuh. Juga mencatat sinyal teknikal saat disentuh untuk uji sinyal exit."""
+    from .holders import cost_basis
+    from .technicals import tech_features
+    rows = []
+    for tok in tokens:
+        pt, pv = tok._pt, [p[2] for p in tok.prices]
+        if len(pt) < 10:
+            continue
+
+        def test(level, t):
+            lo, hi = level * (1 - ZONE), level * (1 + ZONE)
+            for i in range(bisect.bisect_right(pt, t), bisect.bisect_right(pt, t + window_h * H)):
+                if pv[i] >= lo:
+                    seg = pv[i:bisect.bisect_right(pt, pt[i] + 6 * H)]
+                    return pt[i], max(seg) <= hi * 1.05 and min(seg) <= pv[i] * 0.95, 1 - min(seg) / pv[i]
+            return None, False, 0.0
+
+        times = list(range(pt[0] + 2 * 86400, pt[-1] - window_h * H, step_h * H))
+        cbs = cost_basis(tok, times)
+        tok_rows = []
+        for t in times:
+            px = pv[bisect.bisect_right(pt, t) - 1]
+            zs = [z for z in resistance_zones(tok, t, px, None, cbs[t], max_up=0.6) if z["up"] >= 0.05]
+            for z in zs:
+                tt, rej, drop = test(z["price"], t)
+                if tt is not None:
+                    tok_rows.append({"tok": tok.symbol, "kind": "zone", "strength": z["strength"], "touches": z["touches"],
+                                     "ath": z["ath"], "under": z["under"] or 0.0, "vol_share": z["vol_share"],
+                                     "t": tt, "rejected": rej, "drop": drop})
+            for d in (0.1, 0.2, 0.3, 0.4):
+                lvl = px * (1 + d)
+                if not any(abs(math.log(lvl / z["price"])) < 2 * ZONE for z in zs):
+                    tt, rej, drop = test(lvl, t)
+                    if tt is not None:
+                        tok_rows.append({"tok": tok.symbol, "kind": "plain", "t": tt, "rejected": rej, "drop": drop})
+        if signals and tok_rows:
+            tf = tech_features(tok, sorted({r["t"] for r in tok_rows}))
+            for r in tok_rows:
+                r.update(tf.get(r["t"]) or {})
+        rows += tok_rows
+    return rows
+
+
 def resistances(tok, now_t, px_now, max_up=3.0):
     """Swing high 7 hari terakhir di atas harga sekarang (harga tertinggi dalam ±8 jam yang lalu turun >=10%
     dalam 6 jam), digabung per zona ±4%, plus ATH. Urut dari yang terdekat."""
@@ -287,12 +486,14 @@ def supports(tok, now_t, px_now, depth=None, max_drop=0.8):
     return zones
 
 
-def local_ratio(depth, d, half, around=15):
+def local_ratio(depth, d, half, around=15, key="band"):
     """Ketebalan likuiditas di pita d±half (persen) dibanding pita sekitarnya (±around, di luar zona).
-    Pembanding lokal, karena posisi full range secara alami makin tebal per 1% saat harga makin turun."""
-    band = depth["band"]
-    inner = [band[i] for i in range(max(1, int(d - half)), min(GRID, int(d + half)) + 1)]
-    outer = [band[i] for i in range(max(1, int(d - around)), min(GRID, int(d + around)) + 1)
+    Pembanding lokal, karena posisi full range secara alami makin tebal per 1% saat harga makin turun.
+    key="up_band" untuk sisi atas harga."""
+    band = depth[key]
+    n = len(band) - 1
+    inner = [band[i] for i in range(max(1, int(d - half)), min(n, int(d + half)) + 1)]
+    outer = [band[i] for i in range(max(1, int(d - around)), min(n, int(d + around)) + 1)
              if abs(i - d) > half]
     if not inner or not outer or not sum(outer):
         return 0.0

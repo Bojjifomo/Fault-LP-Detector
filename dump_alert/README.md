@@ -53,9 +53,13 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
    seberapa sering tetap di dalam range, seberapa sering menyentuh batas bawah, hasil dalam dolar, dan
    perbandingan dengan batas bawah yang biasa kamu pakai (−60/−65/−70%), range rencanamu, range dengan rata-rata
    tertinggi (sering OOR), dan full range.
-10. **What happened after similar moments?**, **Does it look like a coin right before a crash?** (sekarang
+10. **Where should you take profit?** (baru): resistance kuat di atas harga sebagai tempat exit — level ambil untung
+    (tepat di bawah zona resistance), saran batas atas untuk exit otomatis, peluang tersentuh selama jam tidur,
+    seberapa sering level seperti itu menahan harga saat diuji, level berikutnya kalau tembus, floor untuk exit
+    saat turun, cek momentum teknikal, dan tabel semua resistance.
+11. **What happened after similar moments?**, **Does it look like a coin right before a crash?** (sekarang
     menyebut tanda yang masih kurang), **Chart and on-chain indicators**.
-11. Grafik 72 jam, **If you sleep** (nilai posisimu dalam dolar kalau harga turun 30% / 50%), alarm, rincian filter.
+12. Grafik 72 jam (dengan garis take profit & floor), **If you sleep** (nilai posisimu dalam dolar kalau harga turun 30% / 50%), alarm, rincian filter.
 
 **Tab "📖 How to read the results"** (di atas halaman): panduan membaca dalam bahasa Inggris atau Bahasa
 Indonesia (pilih di tab itu) — cara cepat 30 detik, arti 4 kemungkinan jawaban, penjelasan tiap bagian sesuai
@@ -220,6 +224,34 @@ Target 90% benar-benar menghasilkan ±90% di koin yang tidak dilihat. Untuk jend
 −60..−70% jarang tersentuh; range aman biasanya lebih sempit (fee lebih besar) dengan sedikit lebih sering
 menyentuh batas bawah. Tabel di website menunjukkan keduanya dalam dolar supaya bisa dipilih.
 
+### Exit di resistance kuat (ambil untung)
+
+Zona resistance di atas harga (±4%) dikumpulkan dari: harga yang menolak harga turun ≥10% dalam 7 hari terakhir
+(swing high), ATH, tembok jual di pool (likuiditas sisi atas ≥2,5x sekitarnya), harga dengan volume tinggi, dan
+**harga beli rata-rata holder yang sedang rugi** (mereka cenderung menjual saat balik modal; dihitung dari semua
+wallet). Kekuatan: 3+ penolakan = strong, 1–2 = medium, tanpa penolakan = weak; ≥3% supply dipegang holder rugi di
+zona itu menaikkan satu tingkat (tembok jual juga, berdasarkan mekanika pool).
+
+Diuji di riwayat 24 koin tiap 2 jam (8.318 sentuhan): level "menahan" kalau dalam 6 jam setelah disentuh harga tidak
+tembus >5% di atas zona dan turun ≥5%.
+
+| Level | Datang tenang | Datang dengan momentum (RSI 1j ≥70 atau volume ≥2x) | Semua |
+|---|---|---|---|
+| strong | 42% | 42% | 42% |
+| medium | 42% | 27% | 36% |
+| weak | 40% | 16% | 30% |
+| level acak | 38% | 23% | 31% |
+
+Saat menahan, harga biasanya turun ±20%. Temuan penting: sinyal "overbought" (RSI ≥70, volume melonjak, di atas pita
+Bollinger atas, jauh di atas EMA20) saat menyentuh resistance justru membuat level **lebih sering tembus** (menahan
+27% saat RSI ≥70 vs 39% saat tidak) — momentum menembus level yang lemah. Jadi saat momentum kencang hanya level
+strong yang dipakai sebagai target.
+
+Level ambil untung = zona terdekat yang minimal +8% di atas harga dan menahan ≥40% sesuai momentum sekarang (kalau
+tidak ada, strong pertama), dipasang tepat di bawah zona. Saran: pasang batas atas LP di situ supaya LP otomatis
+menjual ke USDG saat harga naik ke resistance. Peluang tersentuh dihitung dari riwayat koin itu dan situasi serupa.
+Hasil uji disimpan di `reference.json` (`python -m dump_alert.lp_check --resistance-test`).
+
 ### Range dengan rata-rata tertinggi (riset sebelumnya)
 
 Pertanyaannya: dari harga sekarang, range LP mana yang hasilnya paling baik kalau ditinggal tidur?
@@ -285,6 +317,7 @@ python -m dump_alert.fetch --full --token 0xCA          # resolusi harga penuh, 
 python -m dump_alert.lp_check --build-reference          # reference.json: tanda crash, model, uji (±20 menit)
 python -m dump_alert.analogs --build                     # library situasi mirip (±15 menit)
 python -m dump_alert.ranges --build --eval               # riset range optimal: ranges.npz + uji (±15 menit)
+python -m dump_alert.lp_check --resistance-test          # uji zona resistance & sinyal exit (±6 menit)
 python -m dump_alert.study dump_alert/data/0x...json ... [--final] [--value all]   # uji fitur & kontribusi koin
 ```
 

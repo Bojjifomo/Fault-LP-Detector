@@ -170,6 +170,24 @@ def levels_case():
     assert abs(z["price"] - 0.8) < 0.02 and z["touches"] >= 2 and z["bounce"] >= 0.1, zs
     hint = levels.floor_hint([{**z, "strength": "strong"}], 30)
     assert hint["above"] and hint["alt"]["floor"] == 34, hint
+    # resistance: tiga kali naik ke 1,0 lalu ditolak ke 0,8; sekarang 0,8 -> zona di ±1,0 dengan >= 2 penolakan;
+    # holder rugi yang beli di 1,0 (5% supply) menaikkan kekuatan
+    pv2 = [1.0 - 0.2 * abs((i / 12) % 20 - 10) / 10 if i / 12 < 60 else 0.8 for i in range(3 * 288)]
+
+    class Tok2:
+        _pt, prices, events, supply = pt, [[a, 0, b] for a, b in zip(pt, pv2)], [], 1000.0
+    import numpy as np
+    rz = levels.resistance_zones(Tok2, pt[-1], pv2[-1], cb=(np.array([1.0, 0.5]), np.array([50.0, 30.0])))
+    r1 = min(rz, key=lambda r: abs(r["price"] - 1.0))
+    assert abs(r1["price"] - 1.0) < 0.02 and r1["touches"] >= 2 and abs(r1["under"] - 0.05) < 1e-9, rz
+    assert r1["strength"] == "strong" and levels.res_tier(2) == 1 and levels.res_tier(0, 0.04) == 1 and levels.res_tier(3) == 2
+    assert levels.momentum({"rsi1h": 72}) and levels.momentum({"vol_ratio2": 2.5}) and not levels.momentum({"rsi1h": 60})
+    rows_ = [{"kind": "zone", "touches": 3, "under": 0.0, "rejected": True, "drop": 0.2, "rsi1h": 50},
+             {"kind": "zone", "touches": 3, "under": 0.0, "rejected": False, "drop": 0.0, "rsi1h": 75},
+             {"kind": "plain", "rejected": False, "drop": 0.0, "rsi1h": 75}]
+    sm = levels.summarize_resistance_test(rows_)
+    assert sm["zones"]["strong"]["all"]["rate"] == 0.5 and sm["zones"]["strong"]["calm"]["rate"] == 1.0
+    assert sm["signals"]["rsi70"]["on"]["n"] == 2 and sm["signals"]["rsi70"]["on"]["rate"] == 0.0
 
 
 def ranges_case():

@@ -410,6 +410,17 @@ def chart(a):
         layers += [alt.Chart(lv).mark_rule(color=MUTED, strokeDash=[4, 4], strokeWidth=1).encode(y="y:Q"),
                    alt.Chart(lv).mark_text(align="left", dx=4, dy=-6, color=MUTED, fontSize=11).encode(
                        y="y:Q", text="label:N", x=alt.value(0))]
+    ex = a.get("exits") or {}
+    marks = []
+    if ex.get("take"):
+        marks.append({"y": ex["take"]["price"] * a["supply"] * k, "label": f"take profit +{ex['take']['up'] * 100:.0f}%"})
+    if ex.get("floor"):
+        marks.append({"y": ex["floor"]["price"] * a["supply"] * k, "label": f"floor {pct(ex['floor']['drop'])}"})
+    if marks:
+        md = pd.DataFrame(marks)
+        layers += [alt.Chart(md).mark_rule(color=STATUS_TEXT[1], strokeDash=[6, 3], strokeWidth=1).encode(y="y:Q"),
+                   alt.Chart(md).mark_text(align="right", dx=-4, dy=-6, color=STATUS_TEXT[1], fontSize=11).encode(
+                       y="y:Q", text="label:N", x=alt.value(CHART_W))]
     price = alt.layer(*layers).properties(height=260, width=CHART_W)
     whale = alt.layer(
         base.mark_line(strokeWidth=2, color=ACCENT).encode(
@@ -454,6 +465,9 @@ def liquidity_profile(a, lv, band=2, down=80):
     up = 0
     if up_usd:
         want = 40 if not best or rg.is_full(best) else max(40, best[1] + 10)
+        tk = (a.get("exits") or {}).get("take")
+        if tk:
+            want = max(want, tk["up"] * 100 + 10)
         up = int(min(len(up_usd) - 1, want, 160)) // band * band
     rows = []
     for d0 in range(0, down, band):
@@ -500,6 +514,22 @@ def liquidity_profile(a, lv, band=2, down=80):
         zones.append({"y0": max(lo_y, ((1 + z["drop"]) * (1 - ZONE) - 1) * 100), "y1": ((1 + z["drop"]) * (1 + ZONE) - 1) * 100})
         labels.append((mid, f"{pct(z['drop'])} {z['strength']} · {money(z['price'] * supply, usd, qu)}",
                        {"strong": 2, "medium": 3, "weak": 4}[z["strength"]]))
+    res = []
+    ex = a.get("exits") or {}
+    for z in ex.get("zones") or []:
+        mid = z["up"] * 100
+        if mid >= up:
+            continue
+        res.append({"y0": ((1 + z["up"]) * (1 - ZONE) - 1) * 100, "y1": min(up, ((1 + z["up"]) * (1 + ZONE) - 1) * 100)})
+        labels.append((mid, f"+{mid:.0f}% {z['strength']} resistance · {money(z['price'] * supply, usd, qu)}",
+                       {"strong": 2, "medium": 3, "weak": 4}[z["strength"]]))
+    if ex.get("take") and ex["take"]["up"] * 100 < up:
+        labels.append((ex["take"]["up"] * 100, f"take profit +{ex['take']['up'] * 100:.0f}%", 1))
+        over.append(alt.Chart(pd.DataFrame([{"y": ex["take"]["up"] * 100}])).mark_rule(
+            color=STATUS_TEXT[1], strokeDash=[6, 3], strokeWidth=1.5).encode(y="y:Q"))
+    if res:
+        over.insert(0, alt.Chart(pd.DataFrame(res)).mark_rect(color=ASK, opacity=0.12).encode(
+            y="y0:Q", y2="y1:Q", x=alt.datum(0), x2=alt.datum(xmax)))
     kept = []
     for yv, text, pri in sorted(labels, key=lambda x: x[2]):
         if all(abs(yv - kv) >= 4 for kv, _, _ in kept):
@@ -680,6 +710,11 @@ def decision_card(a):
                          f"nights and touched the lower bound in {c['hit_low'] * 100:.1f}%. With {dollars(pos)}: about "
                          f"{usd_of(c['mean'] * pos)} on average over {hours} (fees {usd_of(c['fees'] * pos)}); bad night "
                          f"{usd_of(c['p10'] * pos)}.")
+    tk = (a.get("exits") or {}).get("take")
+    if tk and lvl < 2:
+        lines.append(f"<b>Take profit:</b> around +{tk['up'] * 100:.0f}% (mcap {h(money(tk['price'] * a['supply'], a['usd'], a['quote']))}"
+                     f", just under the {tk['zone']['strength']} resistance at +{tk['zone']['up'] * 100:.0f}%). Upper bound at "
+                     f"+{tk['upper_bound']}% sells automatically there.")
     hs = a.get("holder_summary")
     if hs:
         lines.append(f"<b>Big holders:</b> the 10 biggest wallets hold {hs['share'] * 100:.0f}% of all coins; "
@@ -923,8 +958,8 @@ def liquidity_section(a):
         st.altair_chart(ch, theme=None)
         ui('<p class="hl-small">Each bar = money in the pools at that price. <b>Green</b> (below the price) buys from sellers, '
            'so it slows a fall. <b>Purple</b> (above) sells to buyers, so it slows a pump. <b>Grey</b> (right) = how much was '
-           'traded at that price in the last 7 days. Shaded bands = price floors. Dashed lines = the suggested range. '
-           'Updated every 15 minutes at most.</p>')
+           'traded at that price in the last 7 days. Green-grey bands = price floors, purple bands = resistance, white dashed '
+           'lines = the safe range, orange dashed line = take profit. Updated every 15 minutes at most.</p>')
     if lv["zones"]:
         rows = []
         for z in lv["zones"]:
@@ -1110,6 +1145,143 @@ def range_conclusion(a, rec):
     if a["level"] == 2:
         return txt + " But the verdict is AVOID, so the safest choice is still not to open.", "bad"
     return txt, "good" if pick["mean"] > 0 else "warn"
+
+
+def res_why(z, usd):
+    """Short reasons why a level is a resistance."""
+    why = []
+    if z["touches"]:
+        why.append(f"pushed back {z['touches']}x this week")
+    if z["ath"]:
+        why.append("all-time high")
+    if (z.get("under") or 0) >= 0.01:
+        why.append(f"{z['under'] * 100:.1f}% of coins at break-even")
+    if (z.get("wall_ratio") or 0) >= 2:
+        why.append("sell wall in the pools")
+    if z.get("vol_share", 0) >= 0.05:
+        why.append("busy trading price")
+    return ", ".join(why) or "high-volume or holder level"
+
+
+def reach_txt(z):
+    parts = [f"{v * 100:.0f}% {k}" for k, v in (("this coin", z.get("reach_own")), ("similar", z.get("reach_peer"))) if v is not None]
+    return " · ".join(parts) or "—"
+
+
+def exit_section(a):
+    """Where to take profit: strong resistance above the price, tested on the sample coins, plus a momentum check."""
+    e = a.get("exits")
+    if not e:
+        return
+    usd, qu = a["usd"], a["quote"]
+    hours = f"{a['sleep_h']:g} hours"
+    section("Where should you take profit?",
+            "Resistance = a price where the price was pushed back before, where many holders get their money back, or where "
+            "sellers wait in the pools. Taking profit there avoids giving the gains back.")
+    take, zones = e["take"], e["zones"]
+    if not zones:
+        ui('<div class="hl-alert info">No resistance found above the price (up to +300%). There is no clear exit level: rely '
+           'on your upper bound and the alarm.</div>')
+        return
+    mom = e["momentum"]
+    ui(f'<div class="hl-note">Momentum now: <b>{"strong" if mom else "calm"}</b>. '
+       + ("In tests, when the price ran into a level with strong momentum (RSI 70+ or volume 2x), medium and weak levels "
+          "usually broke; only strong levels still held about 4 times in 10." if mom else
+          "In tests, when the price arrived calmly, strong and medium levels both turned it back about 4 times in 10.")
+       + "</div>")
+    if take:
+        z = take["zone"]
+        hold = f"{z['hold'] * 100:.0f}%" if z.get("hold") is not None else "—"
+        drop = ((e.get("test") or {}).get(z["strength"]) or {}).get("all", {}).get("drop")
+        tiles([("Take profit at", f"+{take['up'] * 100:.0f}%", "pos",
+                f"mcap {money(take['price'] * a['supply'], usd, qu)} · just under the +{z['up'] * 100:.0f}% resistance"),
+               ("Strength", z["strength"], "pos" if z["strength"] == "strong" else "warn-t" if z["strength"] == "medium" else "",
+                res_why(z, usd)),
+               ("Turned the price back in tests", hold, "", f"then it fell ~{drop * 100:.0f}% (typical)" if drop else ""),
+               (f"Chance to reach in {hours}", f"{(z.get('reach') or 0) * 100:.0f}%", "", reach_txt(z))])
+        pick = safe_pick(a)[0]
+        ub = take["upper_bound"]
+        plan = [("good", f"Automatic exit: set your upper bound at +{ub}% (just under this level). If the price climbs into "
+                         f"the resistance, your LP sells the coin for {pair_unit(a)} on the way up — profit is locked even "
+                         "while you sleep.")]
+        if pick and not rg.is_full(pick["range"]) and pick["range"][1] > ub:
+            plan[-1] = (plan[-1][0], plan[-1][1] + f" The safe range goes up to +{pick['range'][1]:g}%; lowering it to +{ub}% "
+                                                   "earns a bit more fees per dollar but leaves no room above the resistance.")
+        plan.append(("info", f"Or close the LP by hand when the price reaches {price_str(take['price'], usd, qu)} "
+                             f"(mcap {money(take['price'] * a['supply'], usd, qu)})."))
+        nx = e.get("next")
+        if nx:
+            plan.append(("info", f"If the price closes 5%+ above it, the level is broken. Next resistance: +{nx['up'] * 100:.0f}% "
+                                 f"(mcap {money(nx['price'] * a['supply'], usd, qu)}, {nx['strength']})."))
+        fl = e.get("floor")
+        if fl:
+            plan.append(("warn", f"Exit early on the way down if the price breaks the floor at {pct(fl['drop'])} (mcap "
+                                 f"{money(fl['price'] * a['supply'], usd, qu)}), or when the alarm says AVOID."))
+        if e.get("whales_selling"):
+            plan.append(("bad", "Big holders are selling right now (0.5%+ of all coins in 4 hours): take profit earlier rather "
+                                "than later."))
+        bullets(plan)
+    rows = []
+    for z in zones:
+        rows.append([money(z["price"] * a["supply"], usd, qu), (f"+{z['up'] * 100:.0f}%", "pos"),
+                     (z["strength"], {"strong": "yes", "medium": "", "weak": "no"}[z["strength"]]), str(z["touches"]),
+                     f"{z['under'] * 100:.1f}%" if z.get("under") is not None else "—",
+                     f"${compact(z['wall'])}" if z.get("wall") is not None else "—",
+                     f"${compact(z['buy_usd'])}" if z.get("buy_usd") is not None else "—",
+                     reach_txt(z), f"{z['hold'] * 100:.0f}%" if z.get("hold") is not None else "—"])
+    table(["Resistance (mcap)", "How far", "Strength", "Push-backs (7d)", "At break-even", "Pool sellers", "Buy to reach",
+           f"Reach ({a['sleep_h']:g}h)", "Held in tests"], rows)
+    ui('<p class="hl-small">Each resistance is a ±4% zone around the level shown. "At break-even" = share of all coins held '
+       'by wallets whose average buy price sits in this zone (they are at a loss now and often sell when they get their money '
+       'back). "Pool sellers" = LP liquidity in the zone that sells to buyers. "Buy to reach" = dollars of buying needed to '
+       'push the price there. "Reach" = how often the price touched this level during a night like this (this coin\'s own '
+       'history and similar moments in other coins).</p>')
+    sig = e["signals"]
+    srows = []
+    for x in sig:
+        t = x.get("test") or {}
+        on, off = (t.get("on") or {}).get("rate"), (t.get("off") or {}).get("rate")
+        eff = ("—" if on is None or off is None else
+               f"held {on * 100:.0f}% vs {off * 100:.0f}% → " + ("level breaks more often" if on < off - 0.03 else
+                                                                 "level holds more often" if on > off + 0.03 else "no clear effect"))
+        srows.append([x["text"], ("✓ now" if x["on"] else "—", "yes" if x["on"] else "no"), eff])
+    with st.expander("Technical check: will the resistance hold?"):
+        table(["Signal", "Now", "In tests, when this signal was on at the resistance"], srows)
+        ui('<p class="hl-small">Surprising but consistent: "overbought" signals (RSI 70+, volume spike, above the upper band) '
+           'meant the price was more likely to <b>break through</b> resistance, not reverse. Momentum carries price through '
+           'weaker levels. Use these to judge whether a level will hold, not as a sell signal on their own.</p>')
+    with how("How are resistances found and tested?"):
+        rt = e.get("test") or {}
+        def cell(k, m):
+            x = (rt.get(k) or {}).get(m) or {}
+            return f"{x['rate'] * 100:.0f}%" if x.get("rate") is not None else "—"
+        table(["Level", "Calm arrival", "With momentum", "All"],
+              [[k.capitalize() if k != "plain" else "Random level (no resistance)", cell(k, "calm"), cell(k, "momentum"),
+                cell(k, "all")] for k in ("strong", "medium", "weak", "plain")])
+        ui('<p class="hl-small">Resistance levels come from: prices that turned the price down 10%+ in the last 7 days, the '
+           'all-time high, sell walls in the pools, busy trading prices, and prices where many holders bought (they sell at '
+           'break-even). Strong = pushed back 3+ times, or 1–2 times with 3%+ of all coins at break-even there. Tested on the '
+           '24 sample coins every 2 hours: a level "held" when the price touched it within 24 hours, did not go more than 5% '
+           'above it in the next 6 hours, and fell 5%+.</p>')
+    conclude(*exit_conclusion(a, e))
+
+
+def exit_conclusion(a, e):
+    usd, qu = a["usd"], a["quote"]
+    take = e["take"]
+    if not take:
+        return "No resistance strong and far enough to aim for. Use your upper bound and the alarm as the exit.", "info"
+    z = take["zone"]
+    txt = (f"Take profit around <b>+{take['up'] * 100:.0f}%</b> (mcap {h(money(take['price'] * a['supply'], usd, qu))}), just "
+           f"under the {z['strength']} resistance at +{z['up'] * 100:.0f}% ({h(res_why(z, usd))}). Set the upper bound at +{take['upper_bound']}% for an "
+           f"automatic exit. It is reached in about {(z.get('reach') or 0) * 100:.0f}% of nights like this; when reached, "
+           f"such levels turned the price back about {(z.get('hold') or 0) * 100:.0f}% of the time.")
+    if e["momentum"] and z["strength"] != "strong":
+        txt += " Momentum is strong now, so this level may break: watch the next one."
+    fl = e.get("floor")
+    if fl:
+        txt += f" On the way down, exit if the floor at {pct(fl['drop'])} breaks."
+    return txt, "good" if z["strength"] == "strong" else "info"
 
 
 def range_section_basic(a):
@@ -1399,6 +1571,7 @@ def render(a):
     flow_section(a)
     liquidity_section(a)
     range_section(a)
+    exit_section(a)
     analog_section(a)
     comparison(a)
     tech_section(a)
@@ -1469,7 +1642,8 @@ def guide_page():
             if title == "Liquidity and price floors":
                 extra = ('<div class="hl-chips">' + "".join(f'<span style="--c:{c}">{n}</span>' for c, n in (
                     (BID, "below the price"), (ASK, "above the price"), (VOL_C, "traded, 7 days"),
-                    ("rgba(151,252,228,.35)", "price floor / safe range"))) + "</div>")
+                    ("rgba(151,252,228,.35)", "price floor / safe range"), ("rgba(144,133,233,.45)", "resistance"),
+                    (STATUS_TEXT[1], "take profit"))) + "</div>")
             elif title == "Last 72 hours":
                 extra = '<div class="hl-chips">' + "".join(f'<span style="--c:{c}">{v}</span>' for v, c in STATUS.items()) + "</div>"
             ui(f'<p class="hl-gwhat"><b>{g["what"]}:</b> {what}</p>{extra}<p class="hl-glab">{g["how"]}</p><ul class="hl-list">'

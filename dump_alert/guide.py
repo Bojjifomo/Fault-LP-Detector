@@ -15,6 +15,7 @@ GUIDE = {
             "Read <b>What to do</b> at the bottom of that box. It already combines everything else on the page.",
             "If you open: use the <b>safe range</b> it shows, put in an amount you can afford to lose, and turn on the "
             "<b>alarm</b>.",
+            "Plan your exit: the <b>Take profit</b> line shows the resistance to sell at (set your upper bound just under it).",
         ],
         "boxes_title": "The 4 possible answers",
         "boxes": [
@@ -92,7 +93,8 @@ GUIDE = {
               "<b>Green bars</b> (below the price) = money waiting to buy if the price drops. They slow a fall.",
               "<b>Purple bars</b> (above) = coins waiting to be sold if the price rises. They slow a pump.",
               "Longer bar = stronger wall. <b>Grey bars</b> (right) = where people traded in the last 7 days.",
-              "Shaded bands = price floors. Dashed lines + the bright bar on the right edge = the safe range.",
+              "Green-grey bands = price floors, purple bands = resistance. White dashed lines + the bright bar on the right "
+              "edge = the safe range. Orange dashed line = take profit.",
               "Floors table: <b>strong</b> = bounced 3+ times this week. <b>Selling needed to get there</b> = how many "
               "dollars someone has to sell to push the price to that floor."],
              ["Long green bars just below the price and a strong floor above your lower bound."],
@@ -113,6 +115,23 @@ GUIDE = {
               "<b>Fee level</b> (\"% a day\"): what a full-range LP earns in this pool now. Higher is better."],
              ["Stays in range 90%+, hits the bottom 3% or less, average positive."],
              ["A yellow box saying the safe range lost money at today's fees (wait), or a negative average."]),
+            ("Where should you take profit?",
+             "Resistance above the price: levels where the price was pushed back before, where many holders get their money "
+             "back, or where sellers wait in the pools — and the best one to take profit at.",
+             ["<b>Take profit at</b>: the level to exit, just under the resistance zone (price and market cap).",
+              "<b>Automatic exit</b>: set your LP's upper bound there. If the price climbs into the resistance, your LP sells "
+              "the coin for USDG on the way up, even while you sleep.",
+              "<b>Strength</b>: strong = pushed the price back 3+ times this week (or 1–2 times with many holders at "
+              "break-even there).",
+              "<b>Turned the price back in tests</b>: how often levels like this held when the price reached them (about 4 in "
+              "10; then the price usually fell ~20%).",
+              "<b>Chance to reach</b>: how often the price touched that level during a night like this.",
+              "<b>Momentum now</b>: with strong momentum (RSI 70+ or volume 2x), only strong levels still held; medium and weak "
+              "ones usually broke. Overbought signals mean \"likely to break through\", not \"sell now\".",
+              "The table lists every resistance up to +300%; the next level is your target if the first one breaks.",
+              "The floor line is the exit on the way down."],
+             ["A strong level within reach, calm momentum, upper bound set just under it."],
+             ["Strong momentum with only medium/weak levels ahead (they tend to break), or big holders selling."]),
             ("What happened after similar moments?",
              "The 30 past moments in other coins that look most like right now, and what happened next.",
              ["\"X of the 30 closest moments crashed\" within 8 hours.",
@@ -135,7 +154,8 @@ GUIDE = {
              "Three stacked charts.",
              ["Top: market cap.",
               "Middle: big holders selling (+) or buying (-). Above the red dashed line (1.5%) = danger.",
-              "Bottom strip: the verdict this tool would have given at each moment (green OK, yellow CAUTION, red AVOID)."],
+              "Bottom strip: the verdict this tool would have given at each moment (green OK, yellow CAUTION, red AVOID).",
+              "Orange dashed lines on the top chart: the take-profit level and the floor."],
              ["Mostly green strip, middle line below the dashed line."],
              ["Middle line above the dashed line right now."]),
             ("If you sleep … hours",
@@ -165,6 +185,8 @@ GUIDE = {
             ("Similar moments", "Past hours in other coins that looked most like right now."),
             ("Sample coins", "The 24 past coins the tool learned from."),
             ("Rewind", "See what the tool would have said at a past moment."),
+            ("Resistance", "A price above where the price tends to stall or turn back down."),
+            ("Momentum", "Strong buying pressure (RSI 70+ or volume 2x normal): it tends to push through weaker resistance."),
         ],
         "check_title": "Checklist before you open",
         "check": [
@@ -194,6 +216,8 @@ GUIDE = {
             "Baca <b>What to do</b> di bagian bawah kotak itu. Isinya sudah menggabungkan semua analisa di halaman.",
             "Kalau buka LP: pakai <b>safe range</b> yang ditampilkan, pakai uang yang siap hilang, dan nyalakan "
             "<b>alarm</b>.",
+            "Rencanakan exit: baris <b>Take profit</b> menunjukkan resistance tempat menjual (pasang batas atas tepat di "
+            "bawahnya).",
         ],
         "boxes_title": "4 kemungkinan jawaban",
         "boxes": [
@@ -272,7 +296,8 @@ GUIDE = {
               "<b>Batang ungu</b> (di atas) = koin yang siap dijual kalau harga naik. Memperlambat pump.",
               "Batang makin panjang = tembok makin kuat. <b>Batang abu-abu</b> (kanan) = harga tempat orang bertransaksi "
               "7 hari terakhir.",
-              "Pita berarsir = price floor (support). Garis putus-putus + batang terang di tepi kanan = safe range.",
+              "Pita hijau-abu = price floor (support), pita ungu = resistance. Garis putih putus-putus + batang terang di tepi "
+              "kanan = safe range. Garis oranye putus-putus = take profit.",
               "Tabel floor: <b>strong</b> = memantul 3+ kali minggu ini. <b>Selling needed to get there</b> = berapa "
               "dolar yang harus dijual untuk mendorong harga ke floor itu."],
              ["Batang hijau panjang tepat di bawah harga dan floor kuat di atas batas bawahmu."],
@@ -294,6 +319,23 @@ GUIDE = {
               "<b>Fee level</b> (\"% a day\"): penghasilan LP full range di pool ini sekarang. Makin tinggi makin bagus."],
              ["Stays in range 90%+, hits the bottom maksimal 3%, average positif."],
              ["Kotak kuning yang bilang safe range rugi di fee hari ini (tunggu), atau average negatif."]),
+            ("Where should you take profit?",
+             "Resistance di atas harga: level tempat harga pernah ditolak, tempat banyak holder balik modal, atau tempat penjual "
+             "menunggu di pool — dan level terbaik untuk ambil untung.",
+             ["<b>Take profit at</b>: level untuk keluar, tepat di bawah zona resistance (harga dan market cap).",
+              "<b>Automatic exit</b>: pasang batas atas LP di situ. Kalau harga naik ke resistance, LP otomatis menjual koin "
+              "jadi USDG saat harga naik, walau kamu sedang tidur.",
+              "<b>Strength</b>: strong = menolak harga 3+ kali minggu ini (atau 1–2 kali dengan banyak holder balik modal di "
+              "situ).",
+              "<b>Turned the price back in tests</b>: seberapa sering level seperti ini menahan harga saat tersentuh (sekitar "
+              "4 dari 10; sesudahnya harga biasanya turun ~20%).",
+              "<b>Chance to reach</b>: seberapa sering harga menyentuh level itu dalam satu malam seperti ini.",
+              "<b>Momentum now</b>: saat momentum kencang (RSI 70+ atau volume 2x), hanya level strong yang masih bertahan; "
+              "medium dan weak biasanya tembus. Sinyal overbought artinya \"cenderung tembus\", bukan \"jual sekarang\".",
+              "Tabel berisi semua resistance sampai +300%; level berikutnya jadi target kalau yang pertama tembus.",
+              "Garis floor adalah titik keluar kalau harga turun."],
+             ["Level strong yang terjangkau, momentum tenang, batas atas dipasang tepat di bawahnya."],
+             ["Momentum kencang tapi di depan hanya level medium/weak (cenderung tembus), atau holder besar menjual."]),
             ("What happened after similar moments?",
              "30 momen di koin lain yang paling mirip dengan sekarang, dan apa yang terjadi sesudahnya.",
              ["\"X of the 30 closest moments crashed\" dalam 8 jam.",
@@ -316,7 +358,8 @@ GUIDE = {
              "Tiga grafik bertumpuk.",
              ["Atas: market cap.",
               "Tengah: holder besar menjual (+) atau membeli (-). Di atas garis merah putus-putus (1,5%) = bahaya.",
-              "Strip bawah: vonis yang akan diberikan tool di tiap momen (hijau OK, kuning CAUTION, merah AVOID)."],
+              "Strip bawah: vonis yang akan diberikan tool di tiap momen (hijau OK, kuning CAUTION, merah AVOID).",
+              "Garis oranye putus-putus di grafik atas: level take profit dan floor."],
              ["Strip kebanyakan hijau, garis tengah di bawah garis putus-putus."],
              ["Garis tengah di atas garis putus-putus saat ini."]),
             ("If you sleep … hours",
@@ -346,6 +389,8 @@ GUIDE = {
             ("Similar moments", "Jam-jam di koin lain yang paling mirip dengan kondisi sekarang."),
             ("Sample coins", "24 koin lama tempat tool ini belajar."),
             ("Rewind", "Lihat apa yang akan dikatakan tool di suatu waktu di masa lalu."),
+            ("Resistance", "Harga di atas tempat harga cenderung tertahan atau berbalik turun."),
+            ("Momentum", "Tekanan beli kuat (RSI 70+ atau volume 2x normal): cenderung menembus resistance yang lemah."),
         ],
         "check_title": "Checklist sebelum buka LP",
         "check": [

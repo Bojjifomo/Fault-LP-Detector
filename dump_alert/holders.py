@@ -6,6 +6,8 @@ Analisa tambahan dari data yang sudah ditarik (tanpa panggilan RPC baru):
                 sudah untung banyak dan mulai menjual = sumber dump.
 - money_flow  : uang yang masuk (beli) dan keluar (jual) 1 / 4 / 24 jam terakhir, jumlah pembeli & penjual,
                 dan beli/jual bersih wallet besar.
+- cost_basis  : harga beli rata-rata & saldo tiap wallet di waktu t — untuk resistance "holder yang sedang rugi"
+                (mereka cenderung menjual saat harga kembali ke harga belinya).
 """
 import bisect
 import collections
@@ -106,4 +108,31 @@ def money_flow(tok, t, windows=(1, 4, 24)):
                     "buyers": len({x[2] for x in sel if x[1] == "buy"}), "sellers": len({x[2] for x in sel if x[1] == "sell"}),
                     "max_buy": max((x[3] for x in sel if x[1] == "buy"), default=0.0),
                     "max_sell": max((x[3] for x in sel if x[1] == "sell"), default=0.0), "whale_net": whale})
+    return out
+
+
+def cost_basis(tok, times, min_share=1e-5):
+    """{t: (harga beli rata-rata, saldo)} untuk tiap waktu di `times` (urut naik): semua wallet yang pernah membeli dan
+    masih memegang >= min_share supply. Jual mengurangi modal secara proporsional (harga beli rata-rata tetap)."""
+    import numpy as np
+    price, S = _price_at(tok), tok.supply
+    bal, cost, bought = collections.Counter(), collections.Counter(), set()
+    E, i, out = tok.events, 0, {}
+    for t in times:
+        while i < len(E) and E[i][0] <= t:
+            et, k, a, v = E[i]
+            i += 1
+            if a in BURN:
+                continue
+            if k in INFLOW:
+                if k == "buy":
+                    cost[a] += v * (price(et) or 0.0)
+                    bought.add(a)
+                bal[a] += v
+            else:
+                if bal[a] > 0:
+                    cost[a] *= max(0.0, bal[a] - v) / bal[a]
+                bal[a] -= v
+        rows = [(cost[a] / b, b) for a in bought if (b := bal[a]) > min_share * S and cost[a] > 0]
+        out[t] = (np.array([r[0] for r in rows]), np.array([r[1] for r in rows])) if rows else (np.zeros(0), np.zeros(0))
     return out

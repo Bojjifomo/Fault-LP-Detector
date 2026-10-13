@@ -19,6 +19,9 @@ What it looks at:
   of similar nights — from the coin's own history and similar moments in the sample coins — plus a 5–10% safety
   margin, compared with your usual lower bounds (-60/-65/-70%). Results in dollars include fees from real volume ×
   the pool's live fee level, diluted by your position size; it tells you to wait when the fees don't pay.
+- **Where to take profit**: strong resistance above the price (past rejections, holders at break-even, sell walls in
+  the pools, busy prices), tested on the sample coins, with a suggested upper bound for an automatic exit and a
+  momentum check (overbought signals tend to break resistance, not reverse it).
 - **Top holders & money flow**: the 10 biggest wallets (share, average buy price, profit multiple, last move) and the
   buys/sells of the last 1/4/24 hours, plus how far the price usually moves while you sleep.
 - **One clear answer at the top** (open / risky / don't open / low risk but fees too low) in plain English, results in
