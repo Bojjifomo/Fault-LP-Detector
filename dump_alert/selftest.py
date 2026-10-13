@@ -223,6 +223,18 @@ def ranges_case():
     assert sf["feasible"] and sf["pick"]["stay"] == 1.0 and sf["margin"] == 5, sf["pick"]
     assert sf["pick"]["range"] == (sf["optimal"]["range"][0] + 5, sf["optimal"]["range"][1] + 5), (sf["pick"], sf["optimal"])
     assert any(c["tag"] == "usual" and c["range"][0] == 60 for c in sf["rows"])
+    # single-sided USDG: batas atas 0% -> 100% USDG saat buka; nilai = lp_value dengan upper 0
+    assert abs(rg.usdg_share((65, 0)) - 1) < 1e-12 and rg.label((65.0, 0.0)) == "-65% to 0%"
+    assert abs(float(rg.lp_values(np.array([0.5]), (65, 0))[0]) - lp_value(-0.5, 65, 0)) < 1e-9
+    assert abs(lp_value(0.4, 65, 0) - 1.0) < 1e-12, "harga naik: tetap 100% USDG, nilai tidak berubah"
+    # batas bawah: jendela ke-i turun i% -> 90% jendela tidak pernah di bawah -90% (-89% belum cukup); naik tidak dihitung
+    assert rg.lower_frontier([(mins, maxs)], 0.9) == 90 and rg.lower_frontier([(mins * 0 + 0.01, maxs)], 0.9) is None
+    rec = rg.Ranges(flat).recommend(0, 1.0, 8, 0.02, 0.0, user=(65.0, 0.0), single=True)
+    sf = rec["safe"]
+    assert sf["mode"] == "single" and sf["feasible"] and sf["optimal"]["range"] == (1.0, 0.0), sf["optimal"]
+    assert sf["pick"]["range"] == (6.0, 0.0) and sf["pick"]["hit_low"] == 0 and sf["pick"]["earn"] == 1.0, sf["pick"]
+    assert all(c["range"][1] == 0 for c in sf["rows"] + sf["ladder"]) and len(sf["ladder"]) == len(rg.SINGLE_LADDER)
+    assert {60.0, 70.0} <= {c["range"][0] for c in sf["rows"] if c["tag"] == "usual"}
     drop = dict(flat, P=np.where(np.arange(n)[:, None] % 2 == 0, 1.0, 0.5).astype(np.float16).repeat(steps, 1))
     assert rg.Ranges(drop).recommend(0, 1.0, 8, 0.0, 0.0)["skip"]
 

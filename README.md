@@ -15,11 +15,17 @@ What it looks at:
 - **Liquidity & support**: the real Uniswap v4 tick map from +200% to −95% of the price, shown as a vertical
   liquidity profile (like VPVR) next to the volume traded at each price, plus liquidity walls, gaps and swing-low
   supports tested on the sample coins.
-- **Safe LP range**: the tightest range that stayed in range for the whole night in at least 90% (80/95% selectable)
+- **Single-sided USDG by default**: most people here LP with only USDG, from today's price (0%) down to a lower
+  bound (e.g. 0% to -65%). The upper bound is then simply today's price, so the tool picks only the lower bound: the
+  closest one the price did not fall to during the night in at least 90% of similar nights, plus 5–10% deeper, and
+  compares it with -60/-65/-70% and a ladder from -20% to -90%. The exit is automatic (the LP sells coin bought on a
+  dip back into USDG when the price returns); floors inside the range show where a bounce may stall. Two-sided
+  (USDG + coin) is one click away.
+- **Safe LP range (two-sided)**: the tightest range that stayed in range for the whole night in at least 90% (80/95% selectable)
   of similar nights — from the coin's own history and similar moments in the sample coins — plus a 5–10% safety
   margin, compared with your usual lower bounds (-60/-65/-70%). Results in dollars include fees from real volume ×
   the pool's live fee level, diluted by your position size; it tells you to wait when the fees don't pay.
-- **Where to take profit**: strong resistance above the price (past rejections, holders at break-even, sell walls in
+- **Where to take profit (two-sided)**: strong resistance above the price (past rejections, holders at break-even, sell walls in
   the pools, busy prices), tested on the sample coins, with a suggested upper bound for an automatic exit and a
   momentum check (overbought signals tend to break resistance, not reverse it).
 - **Top holders & money flow**: the 10 biggest wallets (share, average buy price, profit multiple, last move) and the

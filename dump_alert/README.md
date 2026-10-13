@@ -48,12 +48,23 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
 7. **Is money coming in or going out?** (baru): beli, jual, bersih, jumlah pembeli/penjual, transaksi terbesar,
    dan beli/jual bersih wallet besar untuk 1 / 4 / 24 jam terakhir.
 8. **Liquidity and price floors**: profil likuiditas vertikal ala VPVR, zona support, dampak jual wallet terbesar.
-9. **Which LP range should you open?**: **range aman** — range tersempit yang tidak keluar range (OOR) sepanjang
+**Position type** (di atas form): **Single-sided USDG (0% to −X%)** — default — atau **Two-sided (USDG + coin)**.
+Single-sided: kamu hanya memasukkan USDG, range dari harga sekarang (0% = batas atas) turun ke batas bawah, jadi yang
+dipilih hanya batas bawah. Bagian 9 dan 10 berganti sesuai jenis posisi:
+
+9. *(single-sided)* **How deep should your range go?**: batas bawah terdekat yang tidak tersentuh sepanjang jam
+   tidur di ≥90% malam serupa (dan riwayat koin itu), ditambah **5–10% lebih dalam**. Ditampilkan seberapa sering
+   kena batas bawah, porsi waktu dapat fee, hasil dalam dolar, perbandingan −60/−65/−70%, rencanamu, dan tangga
+   −20..−90%.
+10. *(single-sided)* **When does your position exit?**: exit otomatis di harga saat buka (LP menjual kembali koin
+    yang terbeli saat harga turun), floor di dalam range tempat pantulan bisa tertahan, dan apa yang terjadi di bawah
+    batas bawah. Resistance di atas harga hanya relevan untuk two-sided (ada di bagian lipat).
+9. *(two-sided)* **Which LP range should you open?**: **range aman** — range tersempit yang tidak keluar range (OOR) sepanjang
    jam tidur di ≥90% malam serupa (bisa 80/90/95%), ditambah **jarak aman 5–10%** di kedua sisi. Ditampilkan
    seberapa sering tetap di dalam range, seberapa sering menyentuh batas bawah, hasil dalam dolar, dan
    perbandingan dengan batas bawah yang biasa kamu pakai (−60/−65/−70%), range rencanamu, range dengan rata-rata
    tertinggi (sering OOR), dan full range.
-10. **Where should you take profit?** (baru): resistance kuat di atas harga sebagai tempat exit — level ambil untung
+10. *(two-sided)* **Where should you take profit?**: resistance kuat di atas harga sebagai tempat exit — level ambil untung
     (tepat di bawah zona resistance), saran batas atas untuk exit otomatis, peluang tersentuh selama jam tidur,
     seberapa sering level seperti itu menahan harga saat diuji, level berikutnya kalau tembus, floor untuk exit
     saat turun, cek momentum teknikal, dan tabel semua resistance.
@@ -224,7 +235,40 @@ Target 90% benar-benar menghasilkan ±90% di koin yang tidak dilihat. Untuk jend
 −60..−70% jarang tersentuh; range aman biasanya lebih sempit (fee lebih besar) dengan sedikit lebih sering
 menyentuh batas bawah. Tabel di website menunjukkan keduanya dalam dolar supaya bisa dipilih.
 
-### Exit di resistance kuat (ambil untung)
+### Single-sided USDG (0% sampai −X%)
+
+Dengan hanya USDG, posisi 100% USDG saat dibuka. Harga turun masuk range → USDG membeli koin sedikit demi sedikit
+(dapat fee, dan di situ kerugian bisa terjadi); di bawah batas bawah posisi 100% koin; harga naik → tidak terjadi
+apa-apa (tetap USDG, tidak rugi, tidak dapat fee). Karena itu batas atas = 0% dan yang dicari hanya batas bawah:
+
+1. Batas bawah terkecil −L% supaya harga **tidak pernah turun di bawahnya sepanjang jam tidur** di ≥90% malam
+   (80/90/95%), di situasi serupa koin sampel dan riwayat koin itu sendiri (yang lebih ketat dipakai).
+2. Ditambah **5% lebih dalam** saat risiko rendah, **10%** saat CAUTION/AVOID atau volatilitas tinggi.
+3. Pembanding: −60/−65/−70%, rencanamu, batas bawah dengan rata-rata tertinggi, dan tangga −20..−90%.
+
+Uji leave-one-coin-out (batas bawah dipilih hanya dari koin lain, dicek di koin X, jendela 8 jam, target 90%,
+fee level 2%/hari, posisi 2% pool):
+
+| Batas bawah | Kena batas bawah | Rata-rata per malam | Malam buruk (1 dari 10) |
+|---|---|---|---|
+| terdekat (tanpa jarak) | 9,7% | −0,01% | −6,0% |
+| + 5% | 6,2% | +0,02% | −4,6% |
+| + 10% | 3,7% | +0,03% | −3,6% |
+| −60% | 1,1% | −0,36% | −2,2% |
+| −65% | 0,7% | −0,32% | −1,9% |
+| −70% | 0,4% | −0,29% | −1,7% |
+
+Target 90% menghasilkan ±90% di koin yang tidak dilihat. Batas bawah yang lebih dangkal mendapat fee per dolar lebih
+besar tapi lebih sering kena bawah; −60..−70% jarang kena tapi fee-nya lebih kecil — rata-ratanya mirip, malam
+buruknya lebih ringan. Hasil uji disimpan di `ranges.npz` (`safe_test_single`).
+
+Exit single-sided: tidak ada koin yang dijual di atas harga sekarang. Kalau harga turun masuk range lalu kembali,
+LP otomatis menjual koin kembali jadi USDG sampai 0%. Floor di dalam range yang ditembus bisa jadi atap saat harga
+memantul (aturan chart umum, tidak diuji di tool ini) — tempat menutup LP manual kalau tidak mau menunggu.
+
+CLI: `python -m dump_alert.lp_check <CA> --single --range 65`.
+
+### Exit di resistance kuat (ambil untung, two-sided)
 
 Zona resistance di atas harga (±4%) dikumpulkan dari: harga yang menolak harga turun ≥10% dalam 7 hari terakhir
 (swing high), ATH, tembok jual di pool (likuiditas sisi atas ≥2,5x sekitarnya), harga dengan volume tinggi, dan

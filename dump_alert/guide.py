@@ -15,7 +15,25 @@ GUIDE = {
             "Read <b>What to do</b> at the bottom of that box. It already combines everything else on the page.",
             "If you open: use the <b>safe range</b> it shows, put in an amount you can afford to lose, and turn on the "
             "<b>alarm</b>.",
-            "Plan your exit: the <b>Take profit</b> line shows the resistance to sell at (set your upper bound just under it).",
+            "Plan your exit: single-sided USDG exits by itself when the price comes back to today's price. Two-sided: the "
+            "<b>Take profit</b> line shows the resistance to sell at (set your upper bound just under it).",
+        ],
+        "pos_title": "Your position type — and what the upper bound is",
+        "pos": [
+            "<b>Upper bound</b> = the top of your range (the highest price where your liquidity works). <b>Lower bound</b> = "
+            "the bottom.",
+            "<b>Single-sided USDG</b> (the default): you add only USDG. The range runs from <b>today's price (0%) down to your "
+            "lower bound</b>, e.g. 0% to -65%. So the upper bound is simply 0% (today's price) and you only choose the lower "
+            "bound.",
+            "What happens then: if the price falls into your range, your USDG buys the coin bit by bit and earns fees. Below "
+            "the lower bound you hold only coin and stop earning. If the price goes <b>up</b>, nothing happens: you stay 100% "
+            "USDG (no loss, no fees).",
+            "The exit is automatic: if the price dips and comes back to today's price, the LP sells the coin back into USDG by "
+            "itself.",
+            "<b>Two-sided</b>: you add USDG and the coin, and the range goes below and above today's price (e.g. -65% / +65%). "
+            "Then the upper bound is where your coin gets sold, which is why the take-profit section suggests an upper bound "
+            "just under a resistance.",
+            "Choose the type with <b>Position type</b> above the form on the Check a coin tab.",
         ],
         "boxes_title": "The 4 possible answers",
         "boxes": [
@@ -31,8 +49,9 @@ GUIDE = {
              "One answer for right now: open, wait, be careful or don't open — with 4 short reasons.",
              ["The color and title are the answer (see the 4 answers above).",
               "<b>Crash risk</b>: our model's chance that the price falls 30% or more while you sleep.",
-              "<b>Safe range</b>: the range to use, how often it stayed in range, and the result in dollars for your "
-              "position size.",
+              "<b>Safe range</b>: the range to use, how often it stayed in range (single-sided: how often the price never "
+              "fell to the bottom), and the result in dollars for your position size.",
+              "<b>Exit</b> (single-sided) or <b>Take profit</b> (two-sided): how the position closes.",
               "<b>Big holders</b> and <b>Money flow</b>: who could sell and where money is going.",
               "<b>What to do</b>: the action. Read this first."],
              ["Green box with \"Open the safe range …\"."],
@@ -94,13 +113,32 @@ GUIDE = {
               "<b>Purple bars</b> (above) = coins waiting to be sold if the price rises. They slow a pump.",
               "Longer bar = stronger wall. <b>Grey bars</b> (right) = where people traded in the last 7 days.",
               "Green-grey bands = price floors, purple bands = resistance. White dashed lines + the bright bar on the right "
-              "edge = the safe range. Orange dashed line = take profit.",
+              "edge = the safe range (single-sided: from the lower bound up to \"now\"). Orange dashed line = take profit "
+              "(two-sided only).",
               "Floors table: <b>strong</b> = bounced 3+ times this week. <b>Selling needed to get there</b> = how many "
               "dollars someone has to sell to push the price to that floor."],
              ["Long green bars just below the price and a strong floor above your lower bound."],
              ["\"Almost no liquidity between …\" (the price can slide fast there), or one wallet able to push the price "
               "down 50%+."]),
-            ("Which LP range should you open?",
+            ("How deep should your range go? (single-sided USDG)",
+             "For single-sided USDG: the closest lower bound the price did not fall to during the whole night in at least 90% "
+             "of similar nights, then 5–10% deeper for safety. The upper bound is always 0% (today's price).",
+             ["<b>Lower bound</b> tile: the number to type into Uniswap (price and market cap). <b>Upper bound</b> tile: "
+              "today's price.",
+              "<b>Never hits the bottom</b>: how often the price never fell to your lower bound during the night. <b>Hits the "
+              "bottom</b> is the opposite: from there you hold only coin.",
+              "<b>Earning fees</b>: share of the time the price was inside your range. The rest of the time it was above "
+              "today's price (you just hold USDG).",
+              "<b>Average</b> and <b>Bad night</b> (worst 1 in 10): results in dollars for your position, fees included.",
+              "Table rows: ✓ Recommended, the closest safe lower bound without margin, the other margin, your usual -60 / -65 "
+              "/ -70%, your plan, and the lower bound with the highest average.",
+              "<b>Every lower bound from -20% to -90%</b> (click to open): the whole ladder, to see what going deeper or "
+              "shallower does.",
+              "How to choose: start with ✓ Recommended. Want fewer bottom hits? Pick a deeper row (e.g. -65%): fewer fees, "
+              "but safer."],
+             ["Hits the bottom 5% or less, average positive."],
+             ["A yellow box saying the safe range lost money at today's fees (wait), or hits the bottom 10%+."]),
+            ("Which LP range should you open? (two-sided)",
              "The safe range: the tightest range that stayed in range the whole night in at least 90% of similar "
              "nights, plus a 5–10% safety margin.",
              ["<b>Lower / upper bound</b> tiles: the numbers (price and market cap) to type into Uniswap.",
@@ -115,7 +153,18 @@ GUIDE = {
               "<b>Fee level</b> (\"% a day\"): what a full-range LP earns in this pool now. Higher is better."],
              ["Stays in range 90%+, hits the bottom 3% or less, average positive."],
              ["A yellow box saying the safe range lost money at today's fees (wait), or a negative average."]),
-            ("Where should you take profit?",
+            ("When does your position exit? (single-sided USDG)",
+             "With only USDG you hold no coin above today's price, so there is nothing to sell up there. The exit is automatic.",
+             ["<b>Automatic exit at 0%</b>: if the price dips into your range and comes back to today's price, your LP sells "
+              "the coin back into USDG. You end up 100% USDG with the fees on top.",
+              "<b>Bounce may stall at</b>: a price floor inside your range. A floor the price fell through often turns into a "
+              "ceiling on the way back. If a bounce stops there and you don't want to wait, close the LP by hand (you get part "
+              "USDG, part coin).",
+              "<b>Lower bound</b>: below it you hold only coin. Decide then: sell, or wait for a bounce back into the range.",
+              "<b>Resistance above today's price</b> (click to open): only matters for a two-sided position."],
+             ["Alarm on, and big holders not selling."],
+             ["Big holders selling right now: a dip into your range is more likely tonight."]),
+            ("Where should you take profit? (two-sided)",
              "Resistance above the price: levels where the price was pushed back before, where many holders get their money "
              "back, or where sellers wait in the pools — and the best one to take profit at.",
              ["<b>Take profit at</b>: the level to exit, just under the resistance zone (price and market cap).",
@@ -155,7 +204,7 @@ GUIDE = {
              ["Top: market cap.",
               "Middle: big holders selling (+) or buying (-). Above the red dashed line (1.5%) = danger.",
               "Bottom strip: the verdict this tool would have given at each moment (green OK, yellow CAUTION, red AVOID).",
-              "Orange dashed lines on the top chart: the take-profit level and the floor."],
+              "Orange dashed lines on the top chart: the take-profit level (two-sided only) and the floor."],
              ["Mostly green strip, middle line below the dashed line."],
              ["Middle line above the dashed line right now."]),
             ("If you sleep … hours",
@@ -172,7 +221,11 @@ GUIDE = {
         "glossary_title": "Words used on the page",
         "glossary": [
             ("LP range", "The price band where your liquidity works and earns fees."),
-            ("Lower / upper bound", "The bottom and top of your range, as % from today's price."),
+            ("Lower / upper bound", "The bottom and top of your range, as % from today's price. Single-sided USDG: the upper "
+                                    "bound is 0% (today's price)."),
+            ("Single-sided USDG", "You add only USDG. The range runs from today's price down to your lower bound (e.g. 0% to "
+                                  "-65%)."),
+            ("Two-sided", "You add USDG and the coin. The range goes below and above today's price (e.g. -65% / +65%)."),
             ("Out of range (OOR)", "The price left your range. Below: you hold only the coin. Above: you hold only USDG "
                                    "(no loss, but no fees)."),
             ("Crash", "The price falls 30% or more within the hours you are away."),
@@ -216,8 +269,25 @@ GUIDE = {
             "Baca <b>What to do</b> di bagian bawah kotak itu. Isinya sudah menggabungkan semua analisa di halaman.",
             "Kalau buka LP: pakai <b>safe range</b> yang ditampilkan, pakai uang yang siap hilang, dan nyalakan "
             "<b>alarm</b>.",
-            "Rencanakan exit: baris <b>Take profit</b> menunjukkan resistance tempat menjual (pasang batas atas tepat di "
-            "bawahnya).",
+            "Rencanakan exit: single-sided USDG keluar sendiri saat harga kembali ke harga hari ini. Two-sided: baris "
+            "<b>Take profit</b> menunjukkan resistance tempat menjual (pasang batas atas tepat di bawahnya).",
+        ],
+        "pos_title": "Jenis posisimu — dan apa itu upper bound",
+        "pos": [
+            "<b>Upper bound</b> = batas atas range (harga tertinggi tempat likuiditasmu bekerja). <b>Lower bound</b> = batas "
+            "bawah.",
+            "<b>Single-sided USDG</b> (default): kamu hanya memasukkan USDG. Range-nya dari <b>harga sekarang (0%) turun ke "
+            "batas bawahmu</b>, misalnya 0% sampai -65%. Jadi upper bound-nya ya 0% (harga saat buka) dan kamu hanya memilih "
+            "batas bawah.",
+            "Yang terjadi: kalau harga turun masuk range, USDG-mu membeli koin sedikit demi sedikit dan dapat fee. Di bawah "
+            "batas bawah kamu hanya memegang koin dan berhenti dapat fee. Kalau harga <b>naik</b>, tidak terjadi apa-apa: kamu "
+            "tetap 100% USDG (tidak rugi, tidak dapat fee).",
+            "Exit-nya otomatis: kalau harga turun lalu kembali ke harga saat buka, LP menjual koin kembali jadi USDG dengan "
+            "sendirinya.",
+            "<b>Two-sided</b>: kamu memasukkan USDG dan koin, range-nya di bawah dan di atas harga sekarang (misalnya -65% / "
+            "+65%). Di situ upper bound adalah tempat koinmu terjual, makanya bagian take profit menyarankan upper bound tepat "
+            "di bawah resistance.",
+            "Pilih jenisnya di <b>Position type</b> di atas form pada tab Check a coin.",
         ],
         "boxes_title": "4 kemungkinan jawaban",
         "boxes": [
@@ -233,8 +303,9 @@ GUIDE = {
              "Satu jawaban untuk saat ini: buka, tunggu, hati-hati, atau jangan buka — dengan 4 alasan singkat.",
              ["Warna dan judul adalah jawabannya (lihat 4 jawaban di atas).",
               "<b>Crash risk</b>: peluang dari model bahwa harga turun 30% atau lebih saat kamu tidur.",
-              "<b>Safe range</b>: range yang dipakai, seberapa sering tetap di dalam range, dan hasil dalam dolar untuk "
-              "ukuran posisimu.",
+              "<b>Safe range</b>: range yang dipakai, seberapa sering tetap di dalam range (single-sided: seberapa sering "
+              "harga tidak pernah turun sampai batas bawah), dan hasil dalam dolar untuk ukuran posisimu.",
+              "<b>Exit</b> (single-sided) atau <b>Take profit</b> (two-sided): bagaimana posisi ditutup.",
               "<b>Big holders</b> dan <b>Money flow</b>: siapa yang bisa menjual dan ke mana uang mengalir.",
               "<b>What to do</b>: tindakannya. Baca ini dulu."],
              ["Kotak hijau dengan \"Open the safe range …\"."],
@@ -297,13 +368,32 @@ GUIDE = {
               "Batang makin panjang = tembok makin kuat. <b>Batang abu-abu</b> (kanan) = harga tempat orang bertransaksi "
               "7 hari terakhir.",
               "Pita hijau-abu = price floor (support), pita ungu = resistance. Garis putih putus-putus + batang terang di tepi "
-              "kanan = safe range. Garis oranye putus-putus = take profit.",
+              "kanan = safe range (single-sided: dari batas bawah sampai \"now\"). Garis oranye putus-putus = take profit "
+              "(hanya two-sided).",
               "Tabel floor: <b>strong</b> = memantul 3+ kali minggu ini. <b>Selling needed to get there</b> = berapa "
               "dolar yang harus dijual untuk mendorong harga ke floor itu."],
              ["Batang hijau panjang tepat di bawah harga dan floor kuat di atas batas bawahmu."],
              ["\"Almost no liquidity between …\" (harga bisa meluncur cepat di situ), atau satu wallet bisa menurunkan "
               "harga 50%+."]),
-            ("Which LP range should you open?",
+            ("How deep should your range go? (single-sided USDG)",
+             "Untuk single-sided USDG: batas bawah terdekat yang tidak tersentuh harga sepanjang malam di minimal 90% malam "
+             "serupa, lalu 5–10% lebih dalam supaya aman. Batas atasnya selalu 0% (harga sekarang).",
+             ["Kotak <b>Lower bound</b>: angka yang diisi di Uniswap (harga dan market cap). Kotak <b>Upper bound</b>: harga "
+              "sekarang.",
+              "<b>Never hits the bottom</b>: seberapa sering harga tidak pernah turun sampai batas bawah selama malam itu. "
+              "<b>Hits the bottom</b> kebalikannya: dari situ kamu hanya memegang koin.",
+              "<b>Earning fees</b>: porsi waktu harga berada di dalam range. Sisanya harga di atas harga sekarang (kamu hanya "
+              "memegang USDG).",
+              "<b>Average</b> dan <b>Bad night</b> (terburuk 1 dari 10): hasil dalam dolar untuk posisimu, sudah termasuk fee.",
+              "Baris tabel: ✓ Recommended, batas bawah aman terdekat tanpa jarak, jarak yang lain, kebiasaanmu -60 / -65 / "
+              "-70%, rencanamu, dan batas bawah dengan rata-rata tertinggi.",
+              "<b>Every lower bound from -20% to -90%</b> (klik untuk membuka): semua batas bawah, untuk melihat efek lebih "
+              "dalam atau lebih dangkal.",
+              "Cara memilih: mulai dari ✓ Recommended. Mau lebih jarang kena bawah? Pilih baris yang lebih dalam (misalnya "
+              "-65%): fee lebih kecil, tapi lebih aman."],
+             ["Hits the bottom maksimal 5%, average positif."],
+             ["Kotak kuning yang bilang safe range rugi di fee hari ini (tunggu), atau hits the bottom 10%+."]),
+            ("Which LP range should you open? (two-sided)",
              "Safe range: range tersempit yang tetap di dalam range sepanjang malam di minimal 90% malam serupa, "
              "ditambah jarak aman 5–10%.",
              ["Kotak <b>Lower / upper bound</b>: angka (harga dan market cap) yang diisi di Uniswap.",
@@ -319,7 +409,20 @@ GUIDE = {
               "<b>Fee level</b> (\"% a day\"): penghasilan LP full range di pool ini sekarang. Makin tinggi makin bagus."],
              ["Stays in range 90%+, hits the bottom maksimal 3%, average positif."],
              ["Kotak kuning yang bilang safe range rugi di fee hari ini (tunggu), atau average negatif."]),
-            ("Where should you take profit?",
+            ("When does your position exit? (single-sided USDG)",
+             "Dengan hanya USDG kamu tidak memegang koin di atas harga sekarang, jadi tidak ada yang dijual di atas. Exit-nya "
+             "otomatis.",
+             ["<b>Automatic exit at 0%</b>: kalau harga turun masuk range lalu kembali ke harga saat buka, LP menjual koin "
+              "kembali jadi USDG. Kamu kembali 100% USDG plus fee.",
+              "<b>Bounce may stall at</b>: price floor di dalam range-mu. Floor yang sudah ditembus harga sering berubah jadi "
+              "atap saat harga memantul naik. Kalau pantulan tertahan di situ dan kamu tidak mau menunggu, tutup LP manual "
+              "(dapat sebagian USDG, sebagian koin).",
+              "<b>Lower bound</b>: di bawahnya kamu hanya memegang koin. Putuskan saat itu: jual, atau tunggu harga memantul "
+              "masuk range lagi.",
+              "<b>Resistance above today's price</b> (klik untuk membuka): hanya berpengaruh untuk posisi two-sided."],
+             ["Alarm menyala, dan holder besar tidak menjual."],
+             ["Holder besar sedang menjual: harga lebih mungkin turun masuk range-mu malam ini."]),
+            ("Where should you take profit? (two-sided)",
              "Resistance di atas harga: level tempat harga pernah ditolak, tempat banyak holder balik modal, atau tempat penjual "
              "menunggu di pool — dan level terbaik untuk ambil untung.",
              ["<b>Take profit at</b>: level untuk keluar, tepat di bawah zona resistance (harga dan market cap).",
@@ -359,7 +462,7 @@ GUIDE = {
              ["Atas: market cap.",
               "Tengah: holder besar menjual (+) atau membeli (-). Di atas garis merah putus-putus (1,5%) = bahaya.",
               "Strip bawah: vonis yang akan diberikan tool di tiap momen (hijau OK, kuning CAUTION, merah AVOID).",
-              "Garis oranye putus-putus di grafik atas: level take profit dan floor."],
+              "Garis oranye putus-putus di grafik atas: level take profit (hanya two-sided) dan floor."],
              ["Strip kebanyakan hijau, garis tengah di bawah garis putus-putus."],
              ["Garis tengah di atas garis putus-putus saat ini."]),
             ("If you sleep … hours",
@@ -376,7 +479,11 @@ GUIDE = {
         "glossary_title": "Istilah di halaman",
         "glossary": [
             ("LP range", "Rentang harga tempat likuiditasmu bekerja dan mendapat fee."),
-            ("Lower / upper bound", "Batas bawah dan atas range, dalam % dari harga sekarang."),
+            ("Lower / upper bound", "Batas bawah dan atas range, dalam % dari harga sekarang. Single-sided USDG: batas atas "
+                                    "= 0% (harga saat buka)."),
+            ("Single-sided USDG", "Kamu hanya memasukkan USDG. Range dari harga sekarang turun ke batas bawah (misalnya 0% "
+                                  "sampai -65%)."),
+            ("Two-sided", "Kamu memasukkan USDG dan koin. Range di bawah dan di atas harga sekarang (misalnya -65% / +65%)."),
             ("Out of range (OOR)", "Harga keluar dari range. Di bawah: kamu hanya memegang koin. Di atas: kamu hanya "
                                    "memegang USDG (tidak rugi, tapi tidak dapat fee)."),
             ("Crash", "Harga turun 30% atau lebih selama jam kamu pergi."),

@@ -77,7 +77,9 @@ def usdg_share(rng):
 
 
 def label(rng):
-    return "Full range" if is_full(rng) else f"-{rng[0]:g}% / +{rng[1]:g}%"
+    if is_full(rng):
+        return "Full range"
+    return f"-{rng[0]:g}% to 0%" if rng[1] == 0 else f"-{rng[0]:g}% / +{rng[1]:g}%"
 
 
 # ---------------------------------------------------------------- data koin sampel
@@ -193,6 +195,18 @@ def coverage(src, rng):
     return float(np.mean(~low & (maxs <= 1 + rng[1] / 100))), float(np.mean(low))
 
 
+def lower_frontier(sources, target=TARGET, l_max=95):
+    """Single-sided USDG (range dari harga sekarang ke bawah): batas bawah terkecil L supaya harga tidak pernah turun di
+    bawah -L% sepanjang jam tidur di >= target bagian jendela, di SEMUA sumber. None kalau -95% pun tidak cukup."""
+    for L in range(1, l_max + 1):
+        if all(np.mean(mins >= 1 - L / 100) >= target for mins, _ in sources):
+            return L
+    return None
+
+
+SINGLE_LADDER = (20, 30, 40, 50, 60, 70, 80, 90)
+
+
 class Ranges:
     def __init__(self, d):
         self.tokens = json.loads(str(d["tokens"]))
@@ -201,6 +215,7 @@ class Ranges:
         self.P, self.W = d["P"].astype(float), d["W"].astype(float)
         self.test = json.loads(str(d["test"])) if "test" in d else None
         self.safe_test = json.loads(str(d["safe_test"])) if "safe_test" in d else None
+        self.safe_test_single = json.loads(str(d["safe_test_single"])) if "safe_test_single" in d else None
         self.vb = np.where(np.isnan(self.vol6), 1, np.digitize(np.nan_to_num(self.vol6), self.vol_q))
 
     @classmethod
@@ -281,7 +296,44 @@ class Ranges:
         return {"feasible": True, "target": target, "margin": margin, "optimal": opt, "pick": pick, "rows": rows,
                 "sources": [x[0] for x in sources], "rate": rate}
 
-    def recommend(self, level, vol6, sleep_h, r, share, exclude=None, user=None, own=None, target=TARGET):
+    def safe_single(self, mask, steps, r, share, own=None, target=TARGET, level=0, vb=None, user=None):
+        """Single-sided USDG (batas atas = harga sekarang): batas bawah paling dekat yang tidak tersentuh sepanjang jam
+        tidur di >= target malam serupa (situasi serupa DAN riwayat koin ini), ditambah jarak aman 5-10%. Di atas harga
+        sekarang posisi diam di USDG (tidak rugi, tidak dapat fee), jadi yang dihitung hanya sisi bawah. Juga menilai
+        -60/-65/-70 dan tangga batas bawah -20..-90%."""
+        P = self.P[mask, :steps]
+        peer = (P.min(1), P.max(1))
+        sources = [("similar moments", peer)] + ([("this coin", own)] if own is not None else [])
+
+        def rate(rng, tag=None):
+            st = self.stats(mask, rng, steps, r, share)
+            hit = {name: float(np.mean(src[0] < 1 - rng[0] / 100)) for name, src in sources}
+            st.update(hit_low=max(hit.values()), stay=1 - max(hit.values()), stay_by={k: 1 - v for k, v in hit.items()},
+                      earn=float(np.mean((P >= 1 - rng[0] / 100) & (P <= 1.0))), tag=tag)
+            return st
+        margin = MARGINS[1] if level >= 1 or vb == 2 else MARGINS[0]
+        L = lower_frontier([x[1] for x in sources], target)
+        base = {"mode": "single", "target": target, "margin": margin, "sources": [x[0] for x in sources],
+                "ladder": [rate((float(x), 0.0), "ladder") for x in SINGLE_LADDER]}
+        if L is None:
+            opt = rate((95.0, 0.0), "optimal")
+            return {**base, "feasible": False, "optimal": opt, "pick": opt, "rows": [opt]}
+        opt = rate((float(L), 0.0), "optimal")
+        widen = {m: rate((min(95.0, L + m), 0.0), f"margin{m}") for m in MARGINS}
+        pick = widen[margin]
+        rows = [pick, opt] + [widen[m] for m in MARGINS if m != margin]
+        for lo in USUAL_LOWER:
+            if lo != pick["range"][0]:
+                rows.append(rate((float(lo), 0.0), "usual"))
+        if user is not None and user not in [x["range"] for x in rows]:
+            rows.append(rate(user, "mine"))
+        best = max((rate((float(x), 0.0)) for x in LO), key=lambda c: c["growth"])
+        best["tag"] = "best"
+        if best["range"] not in [x["range"] for x in rows]:
+            rows.append(best)
+        return {**base, "feasible": True, "optimal": opt, "pick": pick, "rows": rows, "rate": rate}
+
+    def recommend(self, level, vol6, sleep_h, r, share, exclude=None, user=None, own=None, target=TARGET, single=False):
         """Range terbaik untuk situasi sekarang. r = tingkat fee pool per hari (setara full range),
         share = modal posisimu / likuiditas aktif pool (setara full range). user = range rencanamu.
         own = (terendah, tertinggi) tiap jendela jam tidur di riwayat koin ini, untuk range aman."""
@@ -289,7 +341,11 @@ class Ranges:
         mask, vb = self.moments(level, self.vol_bucket(vol6), exclude)
         if mask.sum() < 30:
             return None
-        safe = self.safe(mask, steps, r, share, own, target, level, vb, user)
+        if single:
+            safe = self.safe_single(mask, steps, r, share, own, target, level, vb, user)
+        else:
+            safe = self.safe(mask, steps, r, share, own, target, level, vb, user)
+            safe["mode"] = "two"
         rate = safe.pop("rate", None)
         cands = [self.stats(mask, g, steps, r, share) for g in grid()]
         best = max(cands, key=lambda c: c["growth"])
@@ -301,12 +357,12 @@ class Ranges:
         heat = [[next(c["growth"] for c in cands if c["range"] == (l, u)) for u in HI] for l in LO]
         if rate:
             for c in (best, two, full) + ((mine,) if mine else ()):
-                c.update({k: v for k, v in rate(c["range"]).items() if k in ("stay", "hit_low", "stay_by")})
+                c.update({k: v for k, v in rate(c["range"]).items() if k in ("stay", "hit_low", "stay_by", "earn")})
         return {"best": best, "two_sided": two, "full": full, "mine": mine, "skip": best["growth"] < 0, "safe": safe,
                 "heat": heat, "lo": list(LO), "hi": list(HI), "n": int(mask.sum()),
                 "coins": len({int(x) for x in self.tok[mask]}), "vol_bucket": vb, "level": level,
                 "steps": steps, "r": r, "share": share, "test": self.test, "peer_max": self.P[mask, :steps].max(1),
-                "safe_test": self.safe_test}
+                "safe_test": self.safe_test, "safe_test_single": self.safe_test_single}
 
 
 # ---------------------------------------------------------------- tingkat fee live
@@ -461,6 +517,43 @@ def evaluate_safe(rs, target=TARGET, sleep_h=8.0, r=0.02, share=0.02):
     return {"target": target, "r": r, "share": share, "res": out}
 
 
+def evaluate_safe_single(rs, target=TARGET, sleep_h=8.0, r=0.02, share=0.02):
+    """Leave-one-coin-out untuk single-sided USDG: batas bawah dipilih hanya dari koin lain, lalu dicek di koin X
+    seberapa sering harga benar-benar menembus batas bawah selama jam tidur. Dibandingkan dengan -60/-65/-70 tetap."""
+    steps = int(round(sleep_h * H / BLOCK))
+    keys = ["optimal"] + [f"margin{m}" for m in MARGINS] + [f"-{x}" for x in USUAL_LOWER]
+    res = {k: {"low": [], "net": []} for k in keys}
+    for c in range(len(rs.tokens)):
+        me = rs.tok == c
+        if me.sum() < 20:
+            continue
+        for lv in np.unique(rs.level[me]):
+            for vb in np.unique(rs.vb[me & (rs.level == lv)]):
+                sel = me & (rs.level == lv) & (rs.vb == vb)
+                mask, _ = rs.moments(lv, vb, exclude=c)
+                if mask.sum() < 30:
+                    continue
+                P = rs.P[mask, :steps]
+                L = lower_frontier([(P.min(1), P.max(1))], target)
+                if L is None:
+                    continue
+                mins = rs.P[sel, :steps].min(1)
+                rngs = {"optimal": float(L), **{f"margin{m}": min(95.0, L + m) for m in MARGINS},
+                        **{f"-{x}": float(x) for x in USUAL_LOWER}}
+                for k, lo in rngs.items():
+                    res[k]["low"].append((float(np.mean(mins < 1 - lo / 100)), int(sel.sum())))
+                    res[k]["net"].append(rs.outcomes(sel, (lo, 0.0), steps, r, share)[0])
+    out = {}
+    for k, v in res.items():
+        n = sum(x[1] for x in v["low"])
+        net = np.concatenate(v["net"])
+        out[k] = {"hit_low": sum(a * b for a, b in v["low"]) / n, "mean": float(net.mean()),
+                  "p10": float(np.percentile(net, 10)), "n": n}
+        print(f"single {k:9s} hit the bottom {out[k]['hit_low'] * 100:4.1f}%  mean {out[k]['mean'] * 100:+.2f}%  "
+              f"bad night {out[k]['p10'] * 100:+.1f}%", file=sys.stderr)
+    return {"target": target, "r": r, "share": share, "res": out}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Riset range LP optimal di koin sampel")
     ap.add_argument("--build", nargs="*", metavar="DATA_JSON", help="tulis ranges.npz (default: reference_tokens.txt)")
@@ -475,10 +568,12 @@ def main():
         rs = Ranges.load()
         test = evaluate(rs)
         safe_test = evaluate_safe(rs)
+        single_test = evaluate_safe_single(rs)
         with np.load(DATA_PATH, allow_pickle=False) as f:
             d = {k: f[k] for k in f.files}
         d["test"] = json.dumps(test)
         d["safe_test"] = json.dumps(safe_test)
+        d["safe_test_single"] = json.dumps(single_test)
         np.savez_compressed(DATA_PATH, **d)
         print(json.dumps(test, indent=1))
 

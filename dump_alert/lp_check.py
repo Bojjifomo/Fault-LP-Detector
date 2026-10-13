@@ -755,7 +755,7 @@ def model_factors(contrib, x, n=3, sign=1):
 
 
 def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48, mode="balanced",
-           position_usd=1000.0, upper_pct=None, stay_target=0.9):
+           position_usd=1000.0, upper_pct=None, stay_target=0.9, single_sided=False):
     """Penilaian lengkap untuk titik data terakhir (plus riwayat `history_h` jam untuk grafik);
     dipakai CLI dan web app."""
     if not tok._pt:
@@ -850,15 +850,17 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
             plan.update(floor_why=why, support=hint["alt"]["zone"] if why == "support" else None,
                         resistance=levels.resistances(tok, f["t"], f["px"]))
 
-    upper_pct = range_pct if upper_pct is None else upper_pct
+    upper_pct = 0.0 if single_sided else range_pct if upper_pct is None else upper_pct
     own = own_windows(tok, f["t"], sleep_h)
     best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct, stay_target,
-                               own)
+                               own, single_sided)
     from . import holders as hold
     top = hold.top_holders(tok, f["t"])
     flow_now = hold.money_flow(tok, f["t"])
     move = expected_move(tok, level, f["t"], sleep_h, ref)
     exits = exit_plan(f, lv, best_range, own, tview, flow_now, ref)
+    if single_sided:
+        exits.update(single_exit(f, lv, best_range, range_pct))
 
     advice = {2: "Don't open an LP now. Wait for the danger signs to clear, then check again.",
               1: "High risk. If you still go in: small size, wide range, and keep an alarm on.",
@@ -889,6 +891,7 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "ref_names": [x["symbol"] for x in (ref or {}).get("tokens", []) if x["address"] != tok.address],
         "similarity_test": [x for x in (ref or {}).get("similarity_test", []) if x["address"] != tok.address],
         "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "upper_pct": upper_pct,
+        "single_sided": single_sided,
         "sleep_h": sleep_h, "sims": [(d, lp_value(d, range_pct, upper_pct), lp_value(d, 0)) for d in (-0.2, -0.3, -0.5, -0.7)],
         "levels": lv, "tech": tview, "analogs": analog, "model_p": model_p,
         "feature_test": (ref or {}).get("feature_test"), "model": (ref or {}).get("dump_model"),
@@ -967,6 +970,18 @@ def exit_plan(f, lv, rec, own, tview, flow, ref):
             "whales_selling": bool(w4 and w4["whale_net"] <= -0.005), "test": rt.get("zones")}
 
 
+def single_exit(f, lv, rec, plan_lower):
+    """Exit untuk single-sided USDG (range dari harga sekarang ke bawah). Saat dibuka posisi 100% USDG dan tidak
+    memegang koin, jadi resistance di atas harga tidak berpengaruh. Posisi baru memegang koin kalau harga turun ke dalam
+    range; kalau harga lalu naik lagi, posisi otomatis menjual kembali ke USDG sampai harga buka (batas atas = exit
+    otomatis). Floor di dalam range yang ditembus harga akan berubah jadi resistance saat harga memantul: di situ
+    pantulan bisa tertahan, tempat untuk menutup LP kalau tidak mau menunggu sampai harga buka."""
+    pick = (((rec or {}).get("safe") or {}).get("pick") or {}).get("range")
+    lower = pick[0] if pick else plan_lower
+    stall = [z for z in (lv or {}).get("zones", []) if -lower / 100 <= z["drop"] < 0]
+    return {"single": True, "lower": lower, "stall": stall, "auto_exit": f["px"]}
+
+
 def own_windows(tok, t, sleep_h, min_n=100):
     """(terendah, tertinggi) harga relatif tiap jendela jam tidur yang sudah selesai di riwayat koin ini (None kalau
     kurang dari min_n jendela) — untuk menilai seberapa sering sebuah range kena out-of-range."""
@@ -980,7 +995,7 @@ def own_windows(tok, t, sleep_h, min_n=100):
 
 
 def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct=None, stay_target=0.9,
-                  own=None):
+                  own=None, single=False):
     """Range paling optimal dari riset ranges.py untuk situasi sekarang (None kalau datanya tidak ada).
     Dikelompokkan dengan vonis 'balanced' (yang dipakai di riset), apa pun mode tampilannya."""
     from . import ranges
@@ -994,7 +1009,7 @@ def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, posit
     up = range_pct if upper_pct is None else upper_pct
     user = (float(range_pct), float(up)) if range_pct > 0 else ranges.FULL
     rec = rs.recommend(combine_level(rule_level, model_p, "balanced"), f.get("vol6"), sleep_h, fy["r"], fy["share"],
-                       exclude=me, user=user, own=own, target=stay_target)
+                       exclude=me, user=user, own=own, target=stay_target, single=single)
     if rec:
         rec["fee"] = fy
     return rec
@@ -1114,7 +1129,8 @@ def report_text(a) -> str:
         small = " — small sample, treat as rough" if c["n_tokens"] < 5 else ""
         L.append(f"Calibration ({c['n_tokens']} reference coins{small}): when the verdict was {a['verdict']}, a >=30% drop within "
                  f"{c['sleep_h']:g}h happened {c['p30'] * 100:.0f}% of the time (>=50%: {c['p50'] * 100:.0f}%).")
-    rng = "full range" if a["range_pct"] <= 0 else f"range -{a['range_pct']:g}%/+{a['upper_pct']:g}%"
+    rng = ("full range" if a["range_pct"] <= 0 else f"range -{a['range_pct']:g}% to 0% (single-sided USDG)"
+           if a.get("single_sided") else f"range -{a['range_pct']:g}%/+{a['upper_pct']:g}%")
     ra = a["range_advice"]
     if ra.get("p80_round") is not None:
         L += ["", f"Suggested LP range lower bound ({a['sleep_h']:g}h away):",
@@ -1129,8 +1145,17 @@ def report_text(a) -> str:
                   + ("SKIP — no range came out ahead; least bad " if br["skip"] else "")
                   + f"{b['label']}: average {b['mean'] * 100:+.1f}%, 1-in-10 bad case {b['p10'] * 100:+.1f}%, "
                   f"fees {b['fees'] * 100:+.1f}% over {a['sleep_h']:g}h"]
+        sf = br.get("safe") or {}
+        pk = sf.get("pick")
+        if pk and sf.get("mode") == "single":
+            L.append(f"Safe single-sided USDG range: {pk['label']} — hits the bottom {pk['hit_low'] * 100:.1f}% of similar nights, "
+                     f"average {pk['mean'] * 100:+.1f}%, 1-in-10 bad case {pk['p10'] * 100:+.1f}%, fees {pk['fees'] * 100:+.1f}%")
     ex = a.get("exits") or {}
-    if ex.get("take"):
+    if ex.get("single"):
+        L.append("Exit: automatic at today's price (the LP sells any coin bought on a dip back into USDG); floors inside the "
+                 "range where a bounce may stall: " + (", ".join(f"{z['drop'] * 100:+.0f}% ({z['strength']})" for z in ex["stall"])
+                                                       or "none"))
+    elif ex.get("take"):
         tk = ex["take"]
         L.append(f"Take profit: +{tk['up'] * 100:.0f}% (just under the {tk['zone']['strength']} resistance at "
                  f"+{tk['zone']['up'] * 100:.0f}%); upper bound +{tk['upper_bound']}% for an automatic exit")
@@ -1164,6 +1189,7 @@ def main():
     ap.add_argument("token", nargs="?", help="contract address (kosong = ditanya)")
     ap.add_argument("--range", type=float, default=20, help="lebar range LP ± persen; 0 = full range (default 20)")
     ap.add_argument("--sleep", type=float, default=8, help="lama posisi ditinggal, jam (default 8)")
+    ap.add_argument("--single", action="store_true", help="single-sided USDG: range dari harga sekarang (0%%) turun ke -RANGE%%")
     ap.add_argument("--no-fetch", action="store_true", help="pakai data lokal tanpa update")
     ap.add_argument("--at", help="nilai seolah sekarang adalah waktu ini, UTC 'YYYY-MM-DD HH:MM' (pakai data lokal)")
     ap.add_argument("--backtest", action="store_true", help="uji vonis di semua token di dump_alert/data/")
@@ -1239,7 +1265,8 @@ def main():
         raise SystemExit("belum ada data lokal; jalankan tanpa --no-fetch")
     if args.at:
         ds = truncate(ds, parse_time(args.at))
-    a = assess(Token(ds), args.range, args.sleep, load_reference(), None if args.no_fetch else eth_usd())
+    a = assess(Token(ds), args.range, args.sleep, load_reference(), None if args.no_fetch else eth_usd(),
+               single_sided=args.single)
     print(report_text(a) if a else "belum ada data harga/transaksi beli — tidak bisa dinilai.")
 
 
