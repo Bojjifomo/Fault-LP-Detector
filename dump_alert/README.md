@@ -48,8 +48,11 @@ Tampilannya bergaya Hyperliquid (gelap, aksen teal). Tema dipasang lewat CSS di 
 7. **Is money coming in or going out?** (baru): beli, jual, bersih, jumlah pembeli/penjual, transaksi terbesar,
    dan beli/jual bersih wallet besar untuk 1 / 4 / 24 jam terakhir.
 8. **Liquidity and price floors**: profil likuiditas vertikal ala VPVR, zona support, dampak jual wallet terbesar.
-9. **Which LP range should you open?**: range hasil riset (bagian 4) dengan hasil **dalam dolar** untuk ukuran
-   posisimu (rata-rata, malam buruk 1 dari 10, fee), tabel pembanding, dan peta range.
+9. **Which LP range should you open?**: **range aman** — range tersempit yang tidak keluar range (OOR) sepanjang
+   jam tidur di ≥90% malam serupa (bisa 80/90/95%), ditambah **jarak aman 5–10%** di kedua sisi. Ditampilkan
+   seberapa sering tetap di dalam range, seberapa sering menyentuh batas bawah, hasil dalam dolar, dan
+   perbandingan dengan batas bawah yang biasa kamu pakai (−60/−65/−70%), range rencanamu, range dengan rata-rata
+   tertinggi (sering OOR), dan full range.
 10. **What happened after similar moments?**, **Does it look like a coin right before a crash?** (sekarang
     menyebut tanda yang masih kurang), **Chart and on-chain indicators**.
 11. Grafik 72 jam, **If you sleep** (nilai posisimu dalam dolar kalau harga turun 30% / 50%), alarm, rincian filter.
@@ -183,7 +186,36 @@ peringatan; pool USDG dicari ulang tiap 6 jam.
 Di koin yang rawan dump, support lebih sering jebol daripada bertahan. Pakai untuk memilih batas bawah
 range, bukan sebagai jaminan.
 
-### Range paling optimal (riset)
+### Range aman (jarang keluar range) + jarak aman 5–10%
+
+Ini yang dipakai sebagai saran utama di website:
+
+1. Untuk tiap batas bawah −1..−95%, dicari batas atas terkecil supaya harga **tidak pernah keluar range
+   sepanjang jam tidur** di ≥90% malam (pilihan 80/90/95% di form). Dihitung dari dua sumber sekaligus:
+   situasi serupa di koin sampel (vonis × volatilitas yang sama, jalur harga per 15 menit) dan riwayat koin itu
+   sendiri (per 5 menit). Yang dipakai adalah yang lebih ketat.
+2. Dari semua range yang lolos, dipilih yang **paling sempit** (likuiditas paling terkonsentrasi = fee terbesar
+   selama harga di dalam range).
+3. Ditambah **jarak aman**: 5% di kedua sisi saat risiko rendah, 10% saat vonis CAUTION/AVOID atau
+   volatilitas tinggi. Varian 5% dan 10% dua-duanya ditampilkan.
+4. Batas bawah −60/−65/−70% (kebiasaan user) dan range rencanamu ditampilkan sebagai pembanding.
+
+Uji leave-one-coin-out (range dipilih hanya dari koin lain, dicek di koin X, jendela 8 jam, target 90%):
+
+| Range | Tetap di dalam range sepanjang malam | Menyentuh batas bawah |
+|---|---|---|
+| Range tersempit (tanpa jarak) | 89,4% | 4,6% |
+| + jarak 5% | 92,5% | 2,6% |
+| + jarak 10% | 94,2% | 1,5% |
+| batas bawah −60% (batas atas sama) | 94,0% | 1,1% |
+| batas bawah −65% | 94,4% | 0,7% |
+| batas bawah −70% | 94,7% | 0,4% |
+
+Target 90% benar-benar menghasilkan ±90% di koin yang tidak dilihat. Untuk jendela 8 jam, batas bawah
+−60..−70% jarang tersentuh; range aman biasanya lebih sempit (fee lebih besar) dengan sedikit lebih sering
+menyentuh batas bawah. Tabel di website menunjukkan keduanya dalam dolar supaya bisa dipilih.
+
+### Range dengan rata-rata tertinggi (riset sebelumnya)
 
 Pertanyaannya: dari harga sekarang, range LP mana yang hasilnya paling baik kalau ditinggal tidur?
 Dijawab dengan simulasi di riwayat 24 koin sampel (`dump_alert/ranges.py`):

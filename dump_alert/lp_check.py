@@ -755,7 +755,7 @@ def model_factors(contrib, x, n=3, sign=1):
 
 
 def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, history_h=48, mode="balanced",
-           position_usd=1000.0):
+           position_usd=1000.0, upper_pct=None, stay_target=0.9):
     """Penilaian lengkap untuk titik data terakhir (plus riwayat `history_h` jam untuk grafik);
     dipakai CLI dan web app."""
     if not tok._pt:
@@ -850,7 +850,8 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
             plan.update(floor_why=why, support=hint["alt"]["zone"] if why == "support" else None,
                         resistance=levels.resistances(tok, f["t"], f["px"]))
 
-    best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd)
+    upper_pct = range_pct if upper_pct is None else upper_pct
+    best_range = optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct, stay_target)
     from . import holders as hold
     top = hold.top_holders(tok, f["t"])
     flow_now = hold.money_flow(tok, f["t"])
@@ -884,8 +885,8 @@ def assess(tok: Token, range_pct=20.0, sleep_h=8.0, ref=None, usd_per_eth=None, 
         "holders": top, "holder_summary": hold.holder_summary(top), "flow": flow_now, "move": move,
         "ref_names": [x["symbol"] for x in (ref or {}).get("tokens", []) if x["address"] != tok.address],
         "similarity_test": [x for x in (ref or {}).get("similarity_test", []) if x["address"] != tok.address],
-        "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "sleep_h": sleep_h,
-        "sims": [(d, lp_value(d, range_pct), lp_value(d, 0)) for d in (-0.2, -0.3, -0.5, -0.7)],
+        "launch_flags": flags, "info": info, "advice": advice, "range_pct": range_pct, "upper_pct": upper_pct,
+        "sleep_h": sleep_h, "sims": [(d, lp_value(d, range_pct, upper_pct), lp_value(d, 0)) for d in (-0.2, -0.3, -0.5, -0.7)],
         "levels": lv, "tech": tview, "analogs": analog, "model_p": model_p,
         "feature_test": (ref or {}).get("feature_test"), "model": (ref or {}).get("dump_model"),
     }
@@ -914,7 +915,19 @@ def expected_move(tok, level, t, sleep_h, ref):
 _RANGES = []
 
 
-def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd):
+def own_windows(tok, t, sleep_h, min_n=100):
+    """(terendah, tertinggi) harga relatif tiap jendela jam tidur yang sudah selesai di riwayat koin ini (None kalau
+    kurang dari min_n jendela) — untuk menilai seberapa sering sebuah range kena out-of-range."""
+    import numpy as np
+    dd, ru = forward_dd(tok, sleep_h), forward_rise(tok, sleep_h)
+    pairs = [(1 + d, 1 + r) for tt, d, r in zip(tok._pt, dd, ru) if d is not None and r is not None and tt + sleep_h * H <= t]
+    if len(pairs) < min_n:
+        return None
+    a = np.array(pairs)
+    return a[:, 0], a[:, 1]
+
+
+def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, position_usd, upper_pct=None, stay_target=0.9):
     """Range paling optimal dari riset ranges.py untuk situasi sekarang (None kalau datanya tidak ada).
     Dikelompokkan dengan vonis 'balanced' (yang dipakai di riset), apa pun mode tampilannya."""
     from . import ranges
@@ -925,9 +938,10 @@ def optimal_range(tok, m, f, usd, rule_level, model_p, sleep_h, range_pct, posit
         return None
     fy = ranges.fee_yield(tok, m, f["t"], usd, position_usd)
     me = next((i for i, x in enumerate(rs.tokens) if x["address"] == tok.address), None)
-    user = (float(range_pct), float(range_pct)) if range_pct > 0 else ranges.FULL
+    up = range_pct if upper_pct is None else upper_pct
+    user = (float(range_pct), float(up)) if range_pct > 0 else ranges.FULL
     rec = rs.recommend(combine_level(rule_level, model_p, "balanced"), f.get("vol6"), sleep_h, fy["r"], fy["share"],
-                       exclude=me, user=user)
+                       exclude=me, user=user, own=own_windows(tok, f["t"], sleep_h), target=stay_target)
     if rec:
         rec["fee"] = fy
     return rec
@@ -1044,14 +1058,14 @@ def report_text(a) -> str:
         small = " — small sample, treat as rough" if c["n_tokens"] < 5 else ""
         L.append(f"Calibration ({c['n_tokens']} reference coins{small}): when the verdict was {a['verdict']}, a >=30% drop within "
                  f"{c['sleep_h']:g}h happened {c['p30'] * 100:.0f}% of the time (>=50%: {c['p50'] * 100:.0f}%).")
-    rng = "full range" if a["range_pct"] <= 0 else f"range ±{a['range_pct']:g}%"
+    rng = "full range" if a["range_pct"] <= 0 else f"range -{a['range_pct']:g}%/+{a['upper_pct']:g}%"
     ra = a["range_advice"]
     if ra.get("p80_round") is not None:
         L += ["", f"Suggested LP range lower bound ({a['sleep_h']:g}h away):",
               f"  -{ra['p80_round']}%  → 80% chance price stays above it",
               f"  -{ra['p90_round']}%  → 90% chance price stays above it"]
         if ra["breach"] is not None and a["range_pct"] > 0:
-            L.append(f"  Your ±{a['range_pct']:g}% range: ~{ra['breach'] * 100:.0f}% chance of breaking the lower bound")
+            L.append(f"  Your -{a['range_pct']:g}% lower bound: ~{ra['breach'] * 100:.0f}% chance of breaking it")
     br = a.get("best_range")
     if br:
         b = br["best"]

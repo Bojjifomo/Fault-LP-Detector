@@ -195,6 +195,16 @@ def ranges_case():
     assert abs(rec["full"]["fees"] - 0.02 / 3) < 1e-3, rec["full"]["fees"]   # 8 jam = 1/3 hari, full range
     diluted = rg.Ranges(flat).recommend(0, 1.0, 8, 0.02, 1.0)
     assert diluted["best"]["fees"] < rec["best"]["fees"] / 5, "posisi besar ikut membagi fee"
+    # range aman: 100 jendela, jendela ke-i turun i% dan naik i% -> bertahan 90% butuh -90% / +90% (batas bawah lebih dalam tidak membantu)
+    mins, maxs = 1 - np.arange(1, 101) / 100, 1 + np.arange(1, 101) / 100
+    fr = dict(rg.frontier([(mins, maxs)], 0.9))
+    assert fr[90] == 90 and 89 not in fr and fr[95] == 90, fr
+    assert rg.coverage((mins, maxs), (50.0, 100.0)) == (0.5, 0.5) and rg.coverage((mins, maxs), rg.FULL) == (1.0, 0.0)
+    rec = rg.Ranges(flat).recommend(0, 1.0, 8, 0.02, 0.0, user=(65.0, 65.0))
+    sf = rec["safe"]
+    assert sf["feasible"] and sf["pick"]["stay"] == 1.0 and sf["margin"] == 5, sf["pick"]
+    assert sf["pick"]["range"] == (sf["optimal"]["range"][0] + 5, sf["optimal"]["range"][1] + 5), (sf["pick"], sf["optimal"])
+    assert any(c["tag"] == "usual" and c["range"][0] == 60 for c in sf["rows"])
     drop = dict(flat, P=np.where(np.arange(n)[:, None] % 2 == 0, 1.0, 0.5).astype(np.float16).repeat(steps, 1))
     assert rg.Ranges(drop).recommend(0, 1.0, 8, 0.0, 0.0)["skip"]
 

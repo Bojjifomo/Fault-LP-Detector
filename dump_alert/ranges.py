@@ -77,7 +77,7 @@ def usdg_share(rng):
 
 
 def label(rng):
-    return "Full range" if is_full(rng) else f"−{rng[0]:g}% / +{rng[1]:g}%"
+    return "Full range" if is_full(rng) else f"-{rng[0]:g}% / +{rng[1]:g}%"
 
 
 # ---------------------------------------------------------------- data koin sampel
@@ -157,6 +157,42 @@ def build(paths):
 
 # ---------------------------------------------------------------- saran range
 
+# ---------------------------------------------------------------- range aman (jarang keluar range)
+
+TARGET = 0.9          # range aman: harga tetap di dalam range sepanjang jam tidur di >= 90% malam serupa
+MARGINS = (5, 10)     # jarak aman tambahan (persen) di luar range aman: 5% saat tenang, 10% saat risiko/volatilitas tinggi
+USUAL_LOWER = (60, 65, 70)   # batas bawah yang biasa dipakai user, ditampilkan sebagai pembanding
+
+
+def frontier(sources, target=TARGET, l_max=95, u_max=300):
+    """Untuk tiap batas bawah L (1..l_max %), batas atas terkecil U supaya harga tidak pernah keluar dari [-L%, +U%]
+    sepanjang jam tidur di >= target bagian jendela, di SEMUA sumber. sources = [(min, max)] rasio harga per jendela
+    (terendah & tertinggi selama jam tidur dibanding harga awal). Hasil: [(L, U)] (L naik, U turun)."""
+    out = []
+    for L in range(1, l_max + 1):
+        need, ok = 0.0, True
+        for mins, maxs in sources:
+            n = len(mins)
+            low_ok = mins >= 1 - L / 100
+            k = int(math.ceil(target * n - 1e-9))
+            if low_ok.sum() < k:
+                ok = False
+                break
+            need = max(need, (np.sort(maxs[low_ok])[k - 1] - 1) * 100)
+        if ok and need <= u_max:
+            out.append((L, max(1, int(math.ceil(need - 1e-9)))))
+    return out
+
+
+def coverage(src, rng):
+    """(tetap di dalam range sepanjang malam, pernah menyentuh batas bawah) untuk satu sumber."""
+    mins, maxs = src
+    if is_full(rng):
+        return 1.0, 0.0
+    low = mins < 1 - rng[0] / 100
+    return float(np.mean(~low & (maxs <= 1 + rng[1] / 100))), float(np.mean(low))
+
+
 class Ranges:
     def __init__(self, d):
         self.tokens = json.loads(str(d["tokens"]))
@@ -164,6 +200,7 @@ class Ranges:
         self.vol6, self.vol_q = d["vol6"].astype(float), d["vol_q"]
         self.P, self.W = d["P"].astype(float), d["W"].astype(float)
         self.test = json.loads(str(d["test"])) if "test" in d else None
+        self.safe_test = json.loads(str(d["safe_test"])) if "safe_test" in d else None
         self.vb = np.where(np.isnan(self.vol6), 1, np.digitize(np.nan_to_num(self.vol6), self.vol_q))
 
     @classmethod
@@ -210,13 +247,50 @@ class Ranges:
                 "fees": float(fees.mean()), "price": float(price.mean()), "inside": float(inside.mean()),
                 "usdg": usdg_share(rng), "k": concentration(rng)}
 
-    def recommend(self, level, vol6, sleep_h, r, share, exclude=None, user=None):
+    def safe(self, mask, steps, r, share, own=None, target=TARGET, level=0, vb=None, user=None):
+        """Range aman: dari semua range yang tidak keluar range sepanjang jam tidur di >= target malam serupa (situasi
+        serupa di koin sampel DAN riwayat koin ini sendiri kalau cukup), pilih yang paling sempit (fee terbesar selama
+        harga di dalam range), lalu tambahkan jarak aman 5-10% di kedua sisi. Juga menilai batas bawah yang biasa dipakai (-60/-65/-70)."""
+        P = self.P[mask, :steps]
+        peer = (P.min(1), P.max(1))
+        sources = [("similar moments", peer)] + ([("this coin", own)] if own is not None else [])
+        fr = frontier([x[1] for x in sources], target)
+
+        def rate(rng, tag=None):
+            st = self.stats(mask, rng, steps, r, share)
+            cov = {name: coverage(src, rng) for name, src in sources}
+            st.update(stay=min(c[0] for c in cov.values()), hit_low=max(c[1] for c in cov.values()),
+                      stay_by={k: v[0] for k, v in cov.items()}, tag=tag)
+            return st
+        margin = MARGINS[1] if level >= 1 or vb == 2 else MARGINS[0]
+        if not fr:   # bahkan -95% tidak cukup: harga terlalu liar untuk range apa pun
+            opt = rate(FULL, "optimal")
+            return {"feasible": False, "target": target, "margin": margin, "optimal": opt, "pick": opt, "rows": [opt],
+                    "sources": [x[0] for x in sources]}
+        # dari range yang lolos syarat, yang paling sempit (likuiditas paling terkonsentrasi = fee terbesar selama di dalam range)
+        L, U = max(((float(L_), float(U_)) for L_, U_ in fr), key=concentration)
+        opt = rate((L, U), "optimal")
+        widen = {m: rate((min(95.0, L + m), U + m), f"margin{m}") for m in MARGINS}
+        pick = widen[margin]
+        rows = [pick, opt] + [widen[m] for m in MARGINS if m != margin]
+        for lo in USUAL_LOWER:
+            if lo != pick["range"][0]:
+                rows.append(rate((float(lo), pick["range"][1]), "usual"))
+        if user is not None and user not in [x["range"] for x in rows]:
+            rows.append(rate(user, "mine"))
+        return {"feasible": True, "target": target, "margin": margin, "optimal": opt, "pick": pick, "rows": rows,
+                "sources": [x[0] for x in sources], "rate": rate}
+
+    def recommend(self, level, vol6, sleep_h, r, share, exclude=None, user=None, own=None, target=TARGET):
         """Range terbaik untuk situasi sekarang. r = tingkat fee pool per hari (setara full range),
-        share = modal posisimu / likuiditas aktif pool (setara full range). user = range rencanamu."""
+        share = modal posisimu / likuiditas aktif pool (setara full range). user = range rencanamu.
+        own = (terendah, tertinggi) tiap jendela jam tidur di riwayat koin ini, untuk range aman."""
         steps = int(min(STEPS, max(1, round(sleep_h * H / BLOCK))))
         mask, vb = self.moments(level, self.vol_bucket(vol6), exclude)
         if mask.sum() < 30:
             return None
+        safe = self.safe(mask, steps, r, share, own, target, level, vb, user)
+        rate = safe.pop("rate", None)
         cands = [self.stats(mask, g, steps, r, share) for g in grid()]
         best = max(cands, key=lambda c: c["growth"])
         two = max((c for c in cands if not is_full(c["range"]) and c["range"][1] >= TWO_SIDED_UP), key=lambda c: c["growth"])
@@ -225,10 +299,14 @@ class Ranges:
         if user is not None:
             mine = next((c for c in cands if c["range"] == user), None) or self.stats(mask, user, steps, r, share)
         heat = [[next(c["growth"] for c in cands if c["range"] == (l, u)) for u in HI] for l in LO]
-        return {"best": best, "two_sided": two, "full": full, "mine": mine, "skip": best["growth"] < 0,
+        if rate:
+            for c in (best, two, full) + ((mine,) if mine else ()):
+                c.update({k: v for k, v in rate(c["range"]).items() if k in ("stay", "hit_low", "stay_by")})
+        return {"best": best, "two_sided": two, "full": full, "mine": mine, "skip": best["growth"] < 0, "safe": safe,
                 "heat": heat, "lo": list(LO), "hi": list(HI), "n": int(mask.sum()),
                 "coins": len({int(x) for x in self.tok[mask]}), "vol_bucket": vb, "level": level,
-                "steps": steps, "r": r, "share": share, "test": self.test}
+                "steps": steps, "r": r, "share": share, "test": self.test,
+                "safe_test": self.safe_test}
 
 
 # ---------------------------------------------------------------- tingkat fee live
@@ -340,6 +418,49 @@ def evaluate(rs, r_list=(0.01, 0.02, 0.04), shares=(0.005, 0.02, 0.1), sleep_h=8
     return out
 
 
+def evaluate_safe(rs, target=TARGET, sleep_h=8.0, r=0.02, share=0.02):
+    """Leave-one-coin-out untuk range aman: range dipilih hanya dari jalur harga koin lain (vonis x volatilitas yang
+    sama), lalu dicek di koin X: seberapa sering harga benar-benar tetap di dalam range sepanjang malam, seberapa
+    sering menyentuh batas bawah, dan hasil rata-ratanya. Dibandingkan dengan -60/-65/-70 tetap."""
+    steps = int(round(sleep_h * H / BLOCK))
+    res = {k: {"stay": [], "low": [], "net": []} for k in ["optimal"] + [f"margin{m}" for m in MARGINS]
+           + [f"-{x}" for x in USUAL_LOWER]}
+    for c in range(len(rs.tokens)):
+        me = rs.tok == c
+        if me.sum() < 20:
+            continue
+        for lv in np.unique(rs.level[me]):
+            for vb in np.unique(rs.vb[me & (rs.level == lv)]):
+                sel = me & (rs.level == lv) & (rs.vb == vb)
+                mask, _ = rs.moments(lv, vb, exclude=c)
+                if mask.sum() < 30:
+                    continue
+                P = rs.P[mask, :steps]
+                fr = frontier([(P.min(1), P.max(1))], target)
+                if not fr:
+                    continue
+                L, U = max(((float(a), float(b)) for a, b in fr), key=concentration)
+                Q = rs.P[sel, :steps]
+                src = (Q.min(1), Q.max(1))
+                rngs = {"optimal": (L, U), **{f"margin{m}": (min(95.0, L + m), U + m) for m in MARGINS},
+                        **{f"-{x}": (float(x), U + MARGINS[0]) for x in USUAL_LOWER}}
+                for k, rng in rngs.items():
+                    st, lo = coverage(src, rng)
+                    n = sel.sum()
+                    res[k]["stay"].append((st, n))
+                    res[k]["low"].append((lo, n))
+                    res[k]["net"].append(rs.outcomes(sel, rng, steps, r, share)[0])
+    out = {}
+    for k, v in res.items():
+        n = sum(x[1] for x in v["stay"])
+        net = np.concatenate(v["net"])
+        out[k] = {"stay": sum(a * b for a, b in v["stay"]) / n, "hit_low": sum(a * b for a, b in v["low"]) / n,
+                  "mean": float(net.mean()), "p10": float(np.percentile(net, 10)), "n": int(n)}
+        print(f"{k:9s} stayed in range {out[k]['stay'] * 100:5.1f}%  touched lower bound {out[k]['hit_low'] * 100:4.1f}%  "
+              f"mean {out[k]['mean'] * 100:+.2f}%  bad night {out[k]['p10'] * 100:+.1f}%", file=sys.stderr)
+    return {"target": target, "r": r, "share": share, "res": out}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Riset range LP optimal di koin sampel")
     ap.add_argument("--build", nargs="*", metavar="DATA_JSON", help="tulis ranges.npz (default: reference_tokens.txt)")
@@ -353,9 +474,11 @@ def main():
     if args.eval:
         rs = Ranges.load()
         test = evaluate(rs)
+        safe_test = evaluate_safe(rs)
         with np.load(DATA_PATH, allow_pickle=False) as f:
             d = {k: f[k] for k in f.files}
         d["test"] = json.dumps(test)
+        d["safe_test"] = json.dumps(safe_test)
         np.savez_compressed(DATA_PATH, **d)
         print(json.dumps(test, indent=1))
 

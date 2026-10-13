@@ -415,13 +415,13 @@ def liquidity_profile(a, lv, band=2, down=80):
     price, next to what traded at those prices in the last 7 days. Support zones and the best range on top."""
     dep, supply, usd, qu = lv["depth"], a["supply"], a["usd"], a["quote"]
     k, px = usd or 1, a["now"]["px"]
-    rec = a.get("best_range")
-    best = rec["best"]["range"] if rec and not rec["skip"] else None
+    pick = safe_pick(a)[0]
+    best = pick["range"] if pick else None
     up_usd = dep.get("up_usd")
     up = 0
     if up_usd:
         want = 40 if not best or rg.is_full(best) else max(40, best[1] + 10)
-        up = min(len(up_usd) - 1, want, 160) // band * band
+        up = int(min(len(up_usd) - 1, want, 160)) // band * band
     rows = []
     for d0 in range(0, down, band):
         rows.append({"y0": -d0 - band, "y1": -d0, "liq": dep["usd"][d0 + band] - dep["usd"][d0], "side": BELOW,
@@ -450,14 +450,14 @@ def liquidity_profile(a, lv, band=2, down=80):
         rng = pd.DataFrame([{"y0": -best[0], "y1": min(best[1], up) if up else 0}])
         over.append(alt.Chart(rng).mark_rect(color=MINT, opacity=0.07).encode(y="y0:Q", y2="y1:Q", x=alt.datum(0),
                                                                                x2=alt.datum(xmax)))
-        edges = pd.DataFrame([{"y": -best[0], "label": f"Best range low −{best[0]:g}%"}]
-                             + ([{"y": best[1], "label": f"Best range high +{best[1]:g}%"}] if best[1] <= up else []))
+        edges = pd.DataFrame([{"y": -best[0], "label": f"Safe range low -{best[0]:g}%"}]
+                             + ([{"y": best[1], "label": f"Safe range high +{best[1]:g}%"}] if best[1] <= up else []))
         over.append(alt.Chart(edges).mark_rule(color=MINT, strokeDash=[4, 4], strokeWidth=1).encode(y="y:Q"))
         over.append(alt.Chart(rng).mark_rule(color=MINT, strokeWidth=4).encode(y="y0:Q", y2="y1:Q", x=alt.datum(xmax)))
     # labels on the right edge; drop a label when it would collide with a more important one (≥ 4% apart)
     labels = [(0, f"now · {money(px * supply, usd, qu)}", 0)]
     if best and not rg.is_full(best):
-        labels += [(-best[0], f"best range low −{best[0]:g}%", 1)] + ([(best[1], f"best range high +{best[1]:g}%", 1)]
+        labels += [(-best[0], f"safe range low -{best[0]:g}%", 1)] + ([(best[1], f"safe range high +{best[1]:g}%", 1)]
                                                                       if best[1] <= up else [])
     zones = []
     for z in lv["zones"]:
@@ -585,27 +585,45 @@ def usdg_section(a):
             table(["Pool", "Fee", "Share of trades", "Liquidity"], rows)
 
 
+def plan_label(a):
+    """Your planned range as text, e.g. '-65% / +65%' or 'full range'."""
+    return "full range" if a["range_pct"] <= 0 else f"-{a['range_pct']:g}% / +{a.get('upper_pct', a['range_pct']):g}%"
+
+
+def safe_pick(a):
+    """(range aman yang disarankan, info range aman, tidak menguntungkan?) dari hasil riset range."""
+    rec = a.get("best_range")
+    sf = (rec or {}).get("safe") or {}
+    pick = sf.get("pick")
+    return pick, sf, bool(pick) and pick["growth"] < 0
+
+
+def stay_txt(c):
+    return f"{c['stay'] * 100:.0f}%"
+
+
 def decision_card(a):
     """One clear answer at the top: should I open an LP now, and how?"""
     lvl, rec, p, q = a["level"], a.get("best_range"), a["model_p"], a.get("analogs")
     hours, pos = f"{a['sleep_h']:g} hours", a["position_usd"]
-    best = rec["best"] if rec else None
+    pick, sf, skip = safe_pick(a)
     if lvl == 2:
         cls, title, todo = "bad", "🚫 Don't open an LP now", "Wait and check again later. The chance of a big drop is high."
     elif lvl == 1:
         cls, title = "warn", "⚠️ Risky — only small, and keep the alarm on"
-        if rec and rec["skip"]:
+        if skip:
             todo = "Better wait: the crash risk is higher than usual and the fees don't pay for it."
         else:
-            todo = ("If you still open: use a small amount" + (f", the range <b>{h(best['label'])}</b>" if best else "")
+            todo = ("If you still open: use a small amount" + (f", the safe range <b>{h(pick['label'])}</b>" if pick else "")
                     + " and keep the alarm on.")
-    elif rec and rec["skip"]:
+    elif skip:
         cls, title = "info", "✅ Low crash risk — but fees are too low to be worth it now"
-        todo = (f"Better wait until more people trade this coin (more fees). If you open anyway, use <b>{h(best['label'])}</b>"
-                + (f": you start with {best['usdg'] * 100:.0f}% in USDG, so a drop hurts much less." if best["usdg"] >= 0.7 else "."))
+        todo = ("Better wait until more people trade this coin (more fees)."
+                + (f" If you open anyway, use the safe range <b>{h(pick['label'])}</b>." if pick else ""))
     else:
         cls, title = "good", "✅ OK to open an LP"
-        todo = (f"Open <b>{h(best['label'])}</b> and keep the alarm on." if best else "Keep the alarm on while the position is open.")
+        todo = (f"Open the safe range <b>{h(pick['label'])}</b> and keep the alarm on." if pick
+                else "Keep the alarm on while the position is open.")
     lines = []
     doubt = p is not None and q and q["p30"] >= max(0.2, p + 0.1)
     if doubt and lvl < 2:
@@ -615,17 +633,20 @@ def decision_card(a):
         if doubt:
             txt += (f" But {q['n30']} of the {q['n']} most similar past moments did crash, so the real risk may be higher.")
         lines.append(txt)
-    if best:
-        b = best
-        if rec["skip"]:
-            lines.append(f"<b>Fees vs risk: not worth it.</b> This pool pays LPs about {rec['fee']['r'] * 100:.2f}% a day. In similar "
-                         "past moments, the losing nights outweighed the fees for every range.")
+    if pick:
+        c = pick
+        if skip:
+            lines.append(f"<b>Safe range: {h(c['label'])}</b> — it stayed in range the whole night in {stay_txt(c)} of similar "
+                         f"nights, but at today's fees ({rec['fee']['r'] * 100:.2f}% a day) it {lost_or_made(c['mean'] * pos)} "
+                         f"on average with {dollars(pos)}.")
         elif lvl == 2:
-            lines.append(f"<b>Range:</b> if you open anyway, {h(b['label'])} did best in similar moments, but it "
-                         f"{lost_or_made(b['p10'] * pos)} of {dollars(pos)} on a bad night (1 in 10).")
+            lines.append(f"<b>Range:</b> if you open anyway, the safe range is {h(c['label'])} (stayed in range {stay_txt(c)} "
+                         f"of similar nights), but it {lost_or_made(c['p10'] * pos)} of {dollars(pos)} on a bad night (1 in 10).")
         else:
-            lines.append(f"<b>Best range: {h(b['label'])}.</b> With {dollars(pos)}: about {usd_of(b['mean'] * pos)} on average over "
-                         f"{hours} (fees {usd_of(b['fees'] * pos)}). On a bad night (1 in 10): {usd_of(b['p10'] * pos)}.")
+            lines.append(f"<b>Safe range: {h(c['label'])}.</b> It stayed in range the whole night in {stay_txt(c)} of similar "
+                         f"nights and touched the lower bound in {c['hit_low'] * 100:.1f}%. With {dollars(pos)}: about "
+                         f"{usd_of(c['mean'] * pos)} on average over {hours} (fees {usd_of(c['fees'] * pos)}); bad night "
+                         f"{usd_of(c['p10'] * pos)}.")
     hs = a.get("holder_summary")
     if hs:
         lines.append(f"<b>Big holders:</b> the 10 biggest wallets hold {hs['share'] * 100:.0f}% of all coins; "
@@ -753,8 +774,8 @@ def move_section(a):
            f"<b>+{u[80]}%</b>. In the worst 1 of 10 it fell more than {d[90]}%.")
     if a["range_pct"] > 0:
         inside = a["range_pct"] >= d[80]
-        txt += (f" Your ±{a['range_pct']:g}% range " + ("covers the usual drop." if inside else
-                                                         "is tighter than the usual drop, so it will often end out of range."))
+        txt += (f" Your lower bound of -{a['range_pct']:g}% " + ("is below the usual drop." if inside else
+                                                                  "is above the usual drop, so price will often fall through it."))
     conclude(txt, "warn" if d[80] >= 30 else "info")
 
 
@@ -921,13 +942,16 @@ def liquidity_conclusion(a, lv):
 
 
 def range_section(a):
-    """Best LP range from the current price, from the range research on the sample coins."""
+    """Safe LP range from the current price: the tightest range that rarely goes out of range, plus a safety margin."""
     rec, usd, f, qu = a.get("best_range"), a["usd"], a["now"], a["quote"]
     if not rec:
         return range_section_basic(a)
-    fy, best, hours, pos = rec["fee"], rec["best"], f"{a['sleep_h']:g} hours", a["position_usd"]
+    pick, sf, skip = safe_pick(a)
+    fy, hours, pos = rec["fee"], f"{a['sleep_h']:g} hours", a["position_usd"]
+    tgt = f"{sf['target'] * 100:.0f}%"
     section("Which LP range should you open?",
-            f"We opened 133 different ranges in {rec['n']:,} past moments like this one and checked the result after {hours}.")
+            f"The tightest range that stayed in range for the whole {hours} in at least {tgt} of similar nights, plus a "
+            f"{sf['margin']}% safety margin on both sides.")
     if fy["rate"] is not None and not fy["assumed"]:
         fee_txt = (f"This pool takes a {fee_pct(fy['rate'])} fee per trade. ${compact(fy['vol24'])} was traded in 24 hours and the "
                    f"pools hold ${compact(fy['tvl'])}, so a full-range LP earns about <b>{fy['r'] * 100:.2f}% a day</b>.")
@@ -937,11 +961,13 @@ def range_section(a):
        + (" — big enough to shrink your own share of the fees" if fy["share"] > 0.05 else "") + "."
        + "".join(f" Note: {h(n)}." for n in fy["notes"]) + "</div>")
     px, fdv = f["px"], f["px"] * a["supply"]
-    rng = best["range"]
-    if rec["skip"]:
-        ui('<div class="hl-alert warn">⚠️ <b>No range came out ahead</b> in similar past moments at this fee level: over many '
-           'nights, the bad nights outweighed the fees. Waiting is the best choice. If you still want to open one, this is the '
-           'least-bad range:</div>')
+    rng = pick["range"]
+    if not sf["feasible"]:
+        ui(f'<div class="hl-alert bad">🚨 The price swings too much: no range down to -95% stayed in range in {tgt} of similar '
+           'nights. Only a full-range position is safe from going out of range — or skip this coin.</div>')
+    elif skip:
+        ui('<div class="hl-alert warn">⚠️ <b>At today\'s fees, the safe range lost money on average</b> in similar nights. Waiting '
+           'is the better choice. If you still open, use the range below.</div>')
     if rg.is_full(rng):
         lo_tile, hi_tile = ("Lower bound", "none", "", "full range"), ("Upper bound", "none", "", "full range")
     else:
@@ -949,49 +975,72 @@ def range_section(a):
                    f"{price_str(px * (1 - rng[0] / 100), usd, qu)} · mcap {money(fdv * (1 - rng[0] / 100), usd, qu)}")
         hi_tile = ("Upper bound (max price)", f"+{rng[1]:g}%", "pos",
                    f"{price_str(px * (1 + rng[1] / 100), usd, qu)} · mcap {money(fdv * (1 + rng[1] / 100), usd, qu)}")
+    by = " · ".join(f"{k} {v * 100:.0f}%" for k, v in pick["stay_by"].items())
     tiles([lo_tile, hi_tile,
-           (f"Average result ({hours})", usd_of(best["mean"] * pos), sign_class(best["mean"]),
-            f"{pct1(best['mean'])} · fees {usd_of(best['fees'] * pos)}"),
-           ("Bad night (1 in 10)", usd_of(best["p10"] * pos), sign_class(best["p10"]),
-            f"{pct1(best['p10'])} · lose 20%+: {best['big_loss'] * 100:.1f}% of nights")])
-    if not rg.is_full(rng):
-        u = best["usdg"]
-        ui(f'<p class="hl-small" style="margin-bottom:8px">You start with about <b>{u * 100:.0f}% {pair_unit(a)}</b> and '
-           f'{(1 - u) * 100:.0f}% coin. If the price falls, the position slowly buys the coin; below -{rng[0]:g}% you hold only '
-           f'the coin. If the price rises above +{rng[1]:g}%, you hold only {pair_unit(a)}: no loss, it just stops earning '
-           'fees.</p>')
+           ("Stays in range all night", stay_txt(pick), "pos" if pick["stay"] >= 0.9 else "warn-t",
+            f"touches the lower bound {pick['hit_low'] * 100:.1f}% · {by}"),
+           (f"Average result ({hours})", usd_of(pick["mean"] * pos), sign_class(pick["mean"]),
+            f"fees {usd_of(pick['fees'] * pos)} · bad night {usd_of(pick['p10'] * pos)}")])
+    opt = sf["optimal"]
+    if sf["feasible"] and not rg.is_full(rng):
+        ui(f'<p class="hl-small" style="margin-bottom:8px">Tightest safe range: <b>{h(opt["label"])}</b> (stayed in range '
+           f'{stay_txt(opt)} of nights, touched the lower bound {opt["hit_low"] * 100:.1f}%). We added <b>{sf["margin"]}%</b> on '
+           f'both sides ({"10% because the risk or the volatility is higher than usual" if sf["margin"] == 10 else "5% because the risk is low"}). '
+           f'You start with about {pick["usdg"] * 100:.0f}% {pair_unit(a)} and {(1 - pick["usdg"]) * 100:.0f}% coin.</p>')
+    names = {"margin5": "With 5% margin", "margin10": "With 10% margin", "optimal": "Tightest safe (no margin)",
+             "usual": "Your usual lower bound", "mine": "Your plan"}
     rows, seen = [], set()
-    opts = [("Best range", best), ("Best range with more upside", rec["two_sided"]), ("Full range", rec["full"])]
-    if rec["mine"]:
-        plan = "full range" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}%"
-        opts.append((f"Your plan ({plan})", rec["mine"]))
-    for name, c in opts:
+    for c in sf["rows"]:
         if c["range"] in seen:
             continue
         seen.add(c["range"])
-        rows.append([name, c["label"], f"{c['usdg'] * 100:.0f}%", (usd_of(c["mean"] * pos), sign_class(c["mean"])),
-                     (usd_of(c["p10"] * pos), sign_class(c["p10"])), f"{c['big_loss'] * 100:.1f}%", usd_of(c["fees"] * pos),
-                     f"{c['inside'] * 100:.0f}%"])
-    table(["", "Range", f"Starts in {pair_unit(a)}", "Average", "Bad night (1 in 10)", "Lose 20%+", "Fees",
-           "In range at end"], rows)
-    ui(f'<p class="hl-small">Dollar amounts are for your {dollars(pos)} over {hours}, averaged over similar past moments.</p>')
-    with st.expander("Range map: every lower × upper bound"):
+        name = (f"✓ Recommended ({sf['margin']}% margin)" if c is pick else names.get(c["tag"], ""))
+        rows.append(range_row(name, c, pos))
+    hi_name = "Highest average" + (" (often out of range)" if rec["best"].get("stay", 1) < 0.75 else "")
+    for name, c in ((hi_name, rec["best"]), ("Full range", rec["full"])):
+        if c["range"] not in seen and "stay" in c:
+            seen.add(c["range"])
+            rows.append(range_row(name, c, pos))
+    table(["", "Range", "Stays in range", "Hits the bottom", "Average", "Bad night", "Fees", f"{pair_unit(a)} at start"], rows)
+    ui(f'<p class="hl-small">"Stays in range" = the price never left the range during the whole {hours} (the lower of: '
+       f'this coin\'s own history and similar moments in other coins). "Hits the bottom" = the price touched the lower bound. '
+       f'"Bad night" = the worst 1 in 10 nights. Dollar amounts are for your {dollars(pos)}, averaged over similar past '
+       'nights. Wider ranges go out of range less often but earn fewer fees.</p>')
+    with st.expander("Range map: average result of every lower × upper bound"):
         st.altair_chart(range_map(rec), theme=None, width="stretch")
-        ui('<p class="hl-small">Each square = how that range did on average in similar moments. Blue = made money, red = lost '
-           'money. Big losses count extra (like they do for your real balance). The outlined square is the best range.</p>')
+        ui('<p class="hl-small">Each square = how that range did on average in similar moments (blue = made money, red = lost). '
+           'Big losses count extra. The outlined square has the highest average, but narrow ranges like that go out of range '
+           'often.</p>')
     near = [z for z in (a.get("levels") or {}).get("zones", [])
             if not rg.is_full(rng) and -rng[0] / 100 <= z["drop"] < 0 and z["strength"] in ("strong", "medium")]
     if near:
         ui('<p class="hl-small">Price floors inside this range: ' + ", ".join(
             f"{pct(z['drop'])} ({z['strength']})" for z in near) + ' — bounces there keep the position earning.</p>')
-    with how("How was this tested, and why is the range mostly below the price?"):
-        test = range_test_note(rec)
-        ui('<p class="hl-small">' + (test + " " if test else "") +
-           'Why mostly below the price: most sample coins drifted down after busy moments. If the price falls through your '
-           'range, you end up holding only the coin; if it pumps above your range, your gain is capped. A range that sits '
-           'mostly below the price earns fees while buying the dip slowly. If you expect a pump, the "more upside" row keeps '
-           'more of it. This is past behaviour of 24 coins, not a guarantee.</p>')
+    with how("How was this tested?"):
+        ui(f'<p class="hl-small">{safe_test_note(rec) or ""} {range_test_note(rec) or ""}</p>')
     conclude(*range_conclusion(a, rec))
+
+
+def range_row(name, c, pos):
+    return [name, c["label"], (stay_txt(c), "pos" if c["stay"] >= 0.9 else "warn-t" if c["stay"] >= 0.75 else "neg"),
+            (f"{c['hit_low'] * 100:.1f}%", "neg" if c["hit_low"] >= 0.1 else ""),
+            (usd_of(c["mean"] * pos), sign_class(c["mean"])), (usd_of(c["p10"] * pos), sign_class(c["p10"])),
+            usd_of(c["fees"] * pos), f"{c['usdg'] * 100:.0f}%"]
+
+
+def safe_test_note(rec):
+    t = rec.get("safe_test")
+    if not t:
+        return None
+    r = t["res"]
+    m5, m10, opt = r.get("margin5"), r.get("margin10"), r.get("optimal")
+    u = [r.get(f"-{x}") for x in (60, 65, 70)]
+    return (f"Safe ranges were tested on coins the tool had not seen (each range picked only from the other coins). "
+            f"Aiming for {t['target'] * 100:.0f}%, the tightest range really stayed in range {opt['stay'] * 100:.1f}% of nights "
+            f"and touched the lower bound {opt['hit_low'] * 100:.1f}%; with a 5% margin {m5['stay'] * 100:.1f}% / "
+            f"{m5['hit_low'] * 100:.1f}%; with 10% {m10['stay'] * 100:.1f}% / {m10['hit_low'] * 100:.1f}%. Lower bounds of "
+            f"-60 / -65 / -70% touched the bottom on {u[0]['hit_low'] * 100:.1f}% / {u[1]['hit_low'] * 100:.1f}% / "
+            f"{u[2]['hit_low'] * 100:.1f}% of nights.")
 
 
 def fee_pct(rate):
@@ -1003,30 +1052,31 @@ def range_test_note(rec):
     if not test:
         return None
     t = min(test, key=lambda x: abs(math.log(x["r"] / max(rec["r"], 1e-4))) + abs(math.log(x["share"] / max(rec["share"], 1e-4))) * 0.5)
-    o, fu, fx = t["optimal"], t["full"], t["-40/+50"]
-    return (f"We tested this on coins the tool had not seen (fee {t['r'] * 100:g}% a day, position {t['share'] * 100:g}% of "
-            f"the pool). Picking the range this way, and skipping when nothing made money, did better than full range on "
-            f"{t['beats_full']} of {t['coins']} coins. Nights with a 20%+ loss: {o['big_loss'] * 100:.1f}% (full range "
-            f"{fu['big_loss'] * 100:.1f}%, -40%/+50% range {fx['big_loss'] * 100:.1f}%).")
+    return (f"For comparison, the range with the highest average (often out of range) did better than full range on "
+            f"{t['beats_full']} of {t['coins']} unseen coins at a {t['r'] * 100:g}% daily fee level.")
 
 
 def range_conclusion(a, rec):
-    best, mine, hours, pos = rec["best"], rec["mine"], f"{a['sleep_h']:g} hours", a["position_usd"]
-    if rec["skip"]:
-        txt = (f"<b>Skip for now.</b> At today's fees, every range lost money over many nights in similar moments: the bad "
-               f"nights outweighed the good ones. The least-bad range ({h(best['label'])}) {lost_or_made(best['p10'] * pos)} on a "
-               "bad night.")
-        if mine and mine["range"] != best["range"]:
-            txt += f" Your plan {lost_or_made(mine['p10'] * pos)} on a bad night."
-        return txt, "warn"
-    txt = (f"Open <b>{h(best['label'])}</b>: about {usd_of(best['mean'] * pos)} on average over {hours}, and "
-           f"{usd_of(best['p10'] * pos)} on a bad night (1 in 10).")
-    if mine and mine["range"] != best["range"]:
-        txt += (f" Your plan: {usd_of(mine['mean'] * pos)} on average, {usd_of(mine['p10'] * pos)} on a bad night"
-                + (" — the best range is safer." if mine["growth"] < best["growth"] else "."))
+    pick, sf, skip = safe_pick(a)
+    mine, hours, pos = rec["mine"], f"{a['sleep_h']:g} hours", a["position_usd"]
+    if not sf.get("feasible"):
+        return ("The price swings too much for a normal range: only full range stays in range reliably. Skipping is "
+                "safer."), "bad"
+    txt = (f"Safe range <b>{h(pick['label'])}</b>: it stayed in range the whole night in {stay_txt(pick)} of similar nights and "
+           f"touched the lower bound in {pick['hit_low'] * 100:.1f}%. Average {usd_of(pick['mean'] * pos)} over {hours}, "
+           f"bad night {usd_of(pick['p10'] * pos)}.")
+    usual = sorted((c for c in sf["rows"] if c["tag"] == "usual"), key=lambda c: c["range"][0])
+    if usual:
+        txt += (" Your usual lower bounds " + " / ".join(f"-{c['range'][0]:g}%" for c in usual) + " touched the bottom on "
+                + " / ".join(f"{c['hit_low'] * 100:.1f}%" for c in usual) + " of nights, with "
+                + " / ".join(usd_of(c["fees"] * pos) for c in usual) + f" in fees (safe range: {usd_of(pick['fees'] * pos)}).")
+    if mine and mine["range"] != pick["range"] and "stay" in mine:
+        txt += f" Your plan ({h(mine['label'])}) stayed in range {stay_txt(mine)} of nights."
+    if skip:
+        return txt + " At today's fees it lost money on average, so waiting is better.", "warn"
     if a["level"] == 2:
         return txt + " But the verdict is AVOID, so the safest choice is still not to open.", "bad"
-    return txt, "good" if best["mean"] > 0 else "warn"
+    return txt, "good" if pick["mean"] > 0 else "warn"
 
 
 def range_section_basic(a):
@@ -1069,8 +1119,8 @@ def range_section_basic(a):
     if ra["breach"] is not None and a["range_pct"] > 0:
         bad = ra["breach"] > 0.2
         items.append(("bad" if bad else "good",
-                      f"Your planned ±{a['range_pct']:g}% range: about {ra['breach'] * 100:.0f}% chance of breaking its lower "
-                      "bound while you sleep." + (" Too tight to leave overnight." if bad else "")))
+                      f"Your planned lower bound of -{a['range_pct']:g}%: about {ra['breach'] * 100:.0f}% chance of breaking "
+                      "it while you sleep." + (" Too tight to leave overnight." if bad else "")))
     if ra.get("p90_round", 0) >= 70:
         items.append(("warn", "The safe lower bound is very wide. Consider full range, a small position, or skipping this one."))
     if a["level"] == 2:
@@ -1266,7 +1316,7 @@ def tech_section(a):
 def sleep_section(a):
     pos, hours = a["position_usd"], f"{a['sleep_h']:g} hours"
     section(f"If you sleep {hours}")
-    rng = "full range" if a["range_pct"] <= 0 else f"±{a['range_pct']:g}% range"
+    rng = "full range" if a["range_pct"] <= 0 else f"{plan_label(a)} range"
     d30, d50 = a["sims"][1], a["sims"][2]
     items = [("info", f"If the price falls 30% while you sleep, your {dollars(pos)} in a {rng} becomes about "
                       f"{dollars(pos * d30[1])} ({usd_of(pos * (d30[1] - 1))}). If it falls 50%: about {dollars(pos * d50[1])}.")]
@@ -1274,15 +1324,15 @@ def sleep_section(a):
         items.append(("info", f"In its own history, this coin fell 30%+ within {hours} {a['hist_rate'] * 100:.0f}% of the time."))
     items += [("info", line) for line in a["info"]]
     bullets(items)
-    rec = a.get("best_range")
+    pick = safe_pick(a)[0]
     txt = f"A 30% drop would cost your {rng} about {usd_of(pos * (d30[1] - 1))}"
     extra = ""
-    if rec and not rg.is_full(rec["best"]["range"]):
-        b30 = float(rg.lp_values(np.array([0.7]), rec["best"]["range"])[0]) - 1
-        txt += f", or about {usd_of(pos * b30)} with the best range ({h(rec['best']['label'])})"
+    if pick and not rg.is_full(pick["range"]) and pick["range"] != (a["range_pct"], a.get("upper_pct")):
+        b30 = float(rg.lp_values(np.array([0.7]), pick["range"])[0]) - 1
+        txt += f", or about {usd_of(pos * b30)} with the safe range ({h(pick['label'])})"
         if b30 < d30[1] - 1:
-            extra = (" The best range loses more in a big drop, but big drops were rare in moments like this, and that is "
-                     "already counted in its average result.")
+            extra = (" The safe range is tighter, so a big drop costs more, but drops that big stayed rare in nights like "
+                     "this; a wider range costs less in a crash but earns fewer fees.")
     conclude(txt + "." + extra + " Only put in an amount you can lose, and keep the alarm on.",
              "bad" if d30[1] - 1 <= -0.25 else "warn")
     with st.expander("LP value table"):
@@ -1379,9 +1429,14 @@ def main():
     with st.form("check"):
         ca = st.text_input("Contract address", placeholder="0x…")
         c1, c2 = st.columns(2)
-        rng = c1.slider("Your planned LP range (±%)", 0, 100, 20, step=5,
-                        help="How far below and above today's price your range goes. 0 = full range.")
-        sleep_h = c2.slider("Hours you'll be away", 2, 12, 8)
+        rng = c1.slider("Your lower bound (-%)", 0, 95, 65, step=5,
+                        help="How far below today's price your range goes. 0 = full range.")
+        upper = c2.slider("Your upper bound (+%)", 5, 300, 65, step=5, help="How far above today's price your range goes.")
+        c5, c6 = st.columns(2)
+        sleep_h = c5.slider("Hours you'll be away", 2, 12, 8)
+        target = c6.select_slider("Stay in range on at least", ["80%", "90%", "95%"], value="90%",
+                                  help="How often the suggested range should have stayed in range for the whole time "
+                                       "you are away, in similar past nights. Higher = wider range, fewer fees.")
         c3, c4 = st.columns(2)
         position = c3.number_input("Position size (USD)", min_value=10, max_value=10_000_000, value=1000, step=100,
                                    help="How much you plan to put in. Used to show results in dollars. In a small pool, "
@@ -1444,7 +1499,8 @@ def main():
     try:
         with st.spinner("Comparing with the sample coins…"):
             a = assess(Token(ds), rng, sleep_h, ref, eth_price(keys), history_h=72,
-                       mode="conservative" if conservative else "balanced", position_usd=float(position))
+                       mode="conservative" if conservative else "balanced", position_usd=float(position),
+                       upper_pct=float(upper), stay_target=int(target[:-1]) / 100)
         if not a:
             ui('<div class="hl-alert warn">This coin has no Uniswap pool or no buys yet, so it cannot be judged.</div>')
             return

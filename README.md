@@ -15,9 +15,10 @@ What it looks at:
 - **Liquidity & support**: the real Uniswap v4 tick map from +200% to −95% of the price, shown as a vertical
   liquidity profile (like VPVR) next to the volume traded at each price, plus liquidity walls, gaps and swing-low
   supports tested on the sample coins.
-- **Best LP range**: researched by opening 133 different ranges at every past hour of the sample coins and
-  scoring price impact plus fees (real volume × this pool's live fee level, diluted by your position size). It
-  recommends the range that grew money most in similar moments — or tells you to skip when none came out ahead.
+- **Safe LP range**: the tightest range that stayed in range for the whole night in at least 90% (80/95% selectable)
+  of similar nights — from the coin's own history and similar moments in the sample coins — plus a 5–10% safety
+  margin, compared with your usual lower bounds (-60/-65/-70%). Results in dollars include fees from real volume ×
+  the pool's live fee level, diluted by your position size; it tells you to wait when the fees don't pay.
 - **Top holders & money flow**: the 10 biggest wallets (share, average buy price, profit multiple, last move) and the
   buys/sells of the last 1/4/24 hours, plus how far the price usually moves while you sleep.
 - **One clear answer at the top** (open / risky / don't open / low risk but fees too low) in plain English, results in
