@@ -18,7 +18,7 @@ GUIDE = {
             "Plan your exit: single-sided USDG exits by itself when the price comes back to today's price. Two-sided: the "
             "<b>Take profit</b> line shows the resistance to sell at (set your upper bound just under it).",
             "Already have a position open? Type the market cap when you opened it in <b>Already open?</b> (with your lower "
-            "bound in the slider): you get an exit plan with 3 scenarios — bounce, breakout, drop.",
+            "bound in the slider): you get one answer (hold / take profit / close) and a simple price ladder.",
         ],
         "pos_title": "Your position type — and what the upper bound is",
         "pos": [
@@ -59,24 +59,21 @@ GUIDE = {
              ["Green box with \"Open the safe range …\"."],
              ["Red box, or the line \"similar past moments crashed more often than the model says\" (then use a smaller "
               "amount)."]),
-            ("Your open position: exit plan",
-             "Only when you fill in <b>Already open?</b>: where your position stands now and where to get out, from the "
-             "market cap you opened at, your range and today's market cap.",
-             ["<b>Where the price is</b>: in your range (part coin, part USDG, earning fees), above it (100% USDG, nothing "
-              "to sell) or below it (100% coin, no fees).",
-              "<b>Your position now</b>: what it is worth in dollars and how much is coin vs USDG. Fees already earned are "
-              "not included (Uniswap shows them).",
-              "<b>Scenario 1 — the bounce stalls (good exit)</b>: the first resistance above the price that is strong enough "
-              "(turned the price back 40%+ of the time in tests, at least +5% away). Close by hand just under it.",
-              "<b>Scenario 2 — breakout</b>: if the price closes 5%+ above that level, hold for the next one; at the top of "
-              "your range the LP turns 100% USDG by itself.",
-              "<b>Scenario 3 — drop</b>: the floor below the price; if it breaks (5% below the floor zone), close the LP.",
-              "The chart: the line is what your position is worth at each market cap. The table lists every level with its "
-              "dollar value and how often the price got there in a night like this.",
-              "Resistance also counts old floors the price fell through: in tests a level with 2+ broken floors turned the "
-              "price back about 45% of the time, versus 28% for a random level."],
-             ["A strong resistance within reach (\"Gets there\" 40%+), and the drop scenario far away."],
-             ["Verdict AVOID (close now), or the floor to break is very close."]),
+            ("Your position: when to exit",
+             "Only when you fill in <b>Already open?</b>: one answer for your open position, then a price ladder.",
+             ["<b>The colored box</b> is the answer: <b>Hold — it exits by itself at …</b> (the top of your range, where "
+              "your LP is back to 100% USDG), <b>Take profit by hand at …</b> (a strong resistance sits below the top of your "
+              "range), <b>Nothing to do</b> (the price is above your range: you are 100% USDG) or <b>Close it now</b> "
+              "(verdict AVOID).",
+              "<b>The ladder</b> reads like a price chart, top to bottom: ✅ top of your range, 🎯 take-profit level, 📍 now, "
+              "⚠️ close level, 🔻 bottom of your range. Each row: the market cap, what happens there, what your LP is worth "
+              "there, and how often the price got there in a night like this.",
+              "<b>Close if it falls below this</b>: a strong floor that the price reached on 1 in 4 nights or fewer — a normal "
+              "dip does not reach it, so if the price breaks it, something is wrong.",
+              "Dollar amounts leave out the fees your LP already earned (Uniswap shows them).",
+              "<b>Details: every level</b> (click to open) lists all resistances too."],
+             ["\"Hold — it exits by itself\" with a high \"happens on\", and the close level far away."],
+             ["\"Close it now\", or the price already near the close level."]),
             ("Coin tiles",
              "Four numbers about the coin right now.",
              ["<b>Market cap</b>: price × all coins.",
@@ -296,7 +293,7 @@ GUIDE = {
             "Rencanakan exit: single-sided USDG keluar sendiri saat harga kembali ke harga hari ini. Two-sided: baris "
             "<b>Take profit</b> menunjukkan resistance tempat menjual (pasang batas atas tepat di bawahnya).",
             "Sudah punya posisi terbuka? Isi market cap saat kamu buka di <b>Already open?</b> (batas bawahmu di slider): "
-            "kamu dapat rencana exit dengan 3 skenario — pantul, tembus, turun.",
+            "kamu dapat satu jawaban (hold / ambil untung / tutup) dan tangga harga yang sederhana.",
         ],
         "pos_title": "Jenis posisimu — dan apa itu upper bound",
         "pos": [
@@ -337,24 +334,20 @@ GUIDE = {
              ["Kotak hijau dengan \"Open the safe range …\"."],
              ["Kotak merah, atau kalimat \"similar past moments crashed more often than the model says\" (pakai jumlah "
               "lebih kecil)."]),
-            ("Your open position: exit plan",
-             "Hanya muncul kalau kamu isi <b>Already open?</b>: posisi kamu sekarang di mana dan di mana sebaiknya keluar, "
-             "dari market cap saat buka, range-mu, dan market cap sekarang.",
-             ["<b>Where the price is</b>: di dalam range (sebagian koin, sebagian USDG, dapat fee), di atas range (100% USDG, "
-              "tidak ada yang dijual), atau di bawah range (100% koin, tidak dapat fee).",
-              "<b>Your position now</b>: nilai posisimu dalam dolar dan porsi koin vs USDG. Fee yang sudah didapat tidak "
-              "dihitung (lihat di Uniswap).",
-              "<b>Scenario 1 — the bounce stalls (good exit)</b>: resistance pertama di atas harga yang cukup kuat (menahan "
-              "harga 40%+ saat diuji, minimal +5% dari harga sekarang). Tutup manual tepat di bawahnya.",
-              "<b>Scenario 2 — breakout</b>: kalau harga ditutup 5%+ di atas level itu, tahan sampai level berikutnya; di "
-              "batas atas range LP otomatis jadi 100% USDG.",
-              "<b>Scenario 3 — drop</b>: floor di bawah harga; kalau jebol (5% di bawah zona floor), tutup LP.",
-              "Grafiknya: garis = nilai posisimu di tiap market cap. Tabel berisi semua level dengan nilai dolarnya dan "
-              "seberapa sering harga sampai ke sana dalam satu malam seperti ini.",
-              "Resistance juga menghitung floor lama yang sudah ditembus: saat diuji, level dengan 2+ floor jebol menahan harga "
-              "±45%, dibanding ±28% untuk level acak."],
-             ["Resistance kuat yang terjangkau (\"Gets there\" 40%+), dan skenario turun masih jauh."],
-             ["Vonis AVOID (tutup sekarang), atau floor yang bisa jebol sudah sangat dekat."]),
+            ("Your position: when to exit",
+             "Hanya muncul kalau kamu isi <b>Already open?</b>: satu jawaban untuk posisimu, lalu tangga harga.",
+             ["<b>Kotak berwarna</b> adalah jawabannya: <b>Hold — it exits by itself at …</b> (batas atas range-mu, di situ LP "
+              "kembali 100% USDG sendiri), <b>Take profit by hand at …</b> (ada resistance kuat di bawah batas atas range), "
+              "<b>Nothing to do</b> (harga di atas range: kamu sudah 100% USDG) atau <b>Close it now</b> (vonis AVOID).",
+              "<b>Tangga harga</b> dibaca seperti chart, dari atas ke bawah: ✅ batas atas range, 🎯 level ambil untung, 📍 "
+              "sekarang, ⚠️ level tutup, 🔻 batas bawah range. Tiap baris: market cap, apa yang terjadi di situ, nilai LP-mu di "
+              "situ, dan seberapa sering harga sampai ke sana dalam satu malam seperti ini.",
+              "<b>Close if it falls below this</b>: floor kuat yang hanya tersentuh di maksimal 1 dari 4 malam — turun biasa "
+              "tidak sampai ke situ, jadi kalau jebol, ada yang tidak beres.",
+              "Angka dolar belum termasuk fee yang sudah didapat LP-mu (lihat di Uniswap).",
+              "<b>Details: every level</b> (klik untuk membuka) berisi semua resistance."],
+             ["\"Hold — it exits by itself\" dengan \"happens on\" tinggi, dan level tutup masih jauh."],
+             ["\"Close it now\", atau harga sudah dekat level tutup."]),
             ("Coin tiles",
              "Empat angka tentang koin saat ini.",
              ["<b>Market cap</b>: harga × semua koin.",

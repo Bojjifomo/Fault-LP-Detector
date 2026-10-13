@@ -270,17 +270,21 @@ def position_case():
             c, u = lp_split(r, lo, up)
             assert abs(c + u - lp_value(r - 1, lo, up)) < 1e-9 and c >= 0 and u >= 0, (r, lo, up)
     # single-sided -65% dibuka di harga 1,0; sekarang 0,8 (di dalam range). Resistance di +3% (terlalu dekat), +10%
-    # (kuat) dan +18%; floor kuat di -10%. Good exit = +10%, sesudahnya +18%, lalu batas atas.
+    # (kuat), +18% (lemah) dan +20% (sedang); floor kuat di -25%. Good exit = +10%, sesudahnya +20%, lalu batas atas.
     def z(up, strength, hold):
         return {"price": 0.8 * (1 + up) / (1 - levels.ZONE), "up": up, "strength": strength, "hold": hold}
     lv = {"res": [z(0.03, "strong", 0.44), z(0.10, "strong", 0.44), z(0.18, "weak", 0.14), z(0.20, "medium", 0.42)],
-          "zones": [{"price": 0.72, "drop": -0.1, "strength": "strong"}]}
+          "zones": [{"price": 0.6, "drop": -0.25, "strength": "strong"}]}
     rec = {"peer_max": np.linspace(1.0, 1.4, 101), "peer_min": np.linspace(0.6, 1.0, 101)}
     o = position_plan({"px": 0.8}, 1.0, 65, 0, lv, rec, None, False)
     assert o["state"] == "in" and abs(o["value"] - lp_value(-0.2, 65, 0)) < 1e-12 and o["break_even"] == 1.0
     assert o["good"]["kind"] == "resistance" and abs(o["good"]["from_now"] - 0.10) < 1e-9, o["good"]
     assert o["after"]["zone"]["up"] == 0.20 and o["targets"][-1]["kind"] == "top", o["after"]
-    assert abs(o["stop"]["price"] - 0.72 * (1 - levels.ZONE) * 0.95) < 1e-12 and o["bottom"]["price"] == 0.35
+    assert abs(o["stop"]["price"] - 0.6 * (1 - levels.ZONE) * 0.95) < 1e-12 and o["bottom"]["price"] == 0.35
+    # floor yang sering tersentuh (peer_min sering <= level) dilewati -> floor lebih dalam yang jarang
+    lv2 = dict(lv, zones=[{"price": 0.78, "drop": -0.025, "strength": "strong"}, {"price": 0.6, "drop": -0.25, "strength": "medium"}])
+    o2 = position_plan({"px": 0.8}, 1.0, 65, 0, lv2, rec, None, False)
+    assert o2["stop"]["zone"]["price"] == 0.6 and o2["stop"]["reach"] <= 0.25, o2["stop"]
     assert abs(o["targets"][-1]["reach"] - np.mean(rec["peer_max"] >= 1.25)) < 1e-12
     # momentum: medium (42%) tetap boleh, karena hold sudah mengikuti momentum; tanpa resistance kuat -> batas atas
     o = position_plan({"px": 0.8}, 1.0, 65, 0, {"res": [z(0.18, "weak", 0.14)], "zones": []}, rec, None, True)

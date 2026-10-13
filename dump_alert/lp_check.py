@@ -938,6 +938,7 @@ HOLD_OK = 0.40   # zona yang dipakai untuk ambil untung: peluang menolak harga (
 MIN_TP = 0.08    # level ambil untung paling dekat: +8% dari harga sekarang
 OPEN_MIN_TP = 0.05  # posisi yang sudah dibuka: good exit minimal +5% (lebih dekat = praktis tutup sekarang)
 BREAK = 0.95     # floor dianggap jebol 5% di bawah tepi bawah zonanya (definisi yang sama dengan support_test)
+STOP_MAX_REACH = 0.25  # batas tutup = floor yang jebolnya jarang (<= 1 dari 4 malam): turun biasa tidak memicu
 
 
 def exit_plan(f, lv, rec, own, tview, flow, ref):
@@ -1021,7 +1022,8 @@ def position_plan(f, entry_px, lower, upper, lv, rec, own, mom):
     sudah ditembus — teruji jadi atap) plus batas atas sendiri (exit otomatis); 'good exit' = tepat di bawah zona
     pertama yang cukup kuat (peluang menolak >= 40% sesuai momentum sekarang), kalau tidak ada: batas atas. Batas
     keluar di bawah = floor strong/medium terdekat. Peluang tersentuh selama jam tidur dari riwayat koin ini & situasi
-    serupa. Nilai relatif ke modal awal, belum termasuk fee yang sudah didapat."""
+    serupa. Batas tutup = floor strong/medium pertama yang jebolnya jarang (<= STOP_MAX_REACH malam), supaya turun
+    biasa tidak memicu. Nilai relatif ke modal awal, belum termasuk fee yang sudah didapat."""
     import numpy as np
     px = f["px"]
     pa, pb = entry_px * (1 - lower / 100), entry_px * (1 + upper / 100)
@@ -1063,8 +1065,15 @@ def position_plan(f, entry_px, lower, upper, lv, rec, own, mom):
     after = None
     if good and good["kind"] == "resistance":
         after = next((t for t in targets if t["price"] > good["price"] and (t["kind"] == "top" or t["strong_enough"])), None)
-    floor = next((z for z in (lv or {}).get("zones", []) if z["strength"] in ("strong", "medium")), None)
-    stop = row("stop", floor["price"] * (1 - levels.ZONE) * BREAK, zone=floor) if floor else None
+    stop = None
+    for z in (lv or {}).get("zones", []):   # urut dari yang terdekat di bawah harga
+        p = z["price"] * (1 - levels.ZONE) * BREAK
+        if z["strength"] not in ("strong", "medium") or (state == "in" and p <= pa):
+            continue
+        r_ = reach(p)
+        if r_ is None or r_ <= STOP_MAX_REACH:
+            stop = row("stop", p, zone=z)
+            break
     bottom = row("bottom", pa) if pa < px else None
     out.update(targets=targets, good=good, after=after, stop=stop, bottom=bottom, now=row("now", px))
     return out

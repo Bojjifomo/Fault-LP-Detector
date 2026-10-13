@@ -22,10 +22,10 @@ What it looks at:
   dip back into USDG when the price returns); floors inside the range show where a bounce may stall. Two-sided
   (USDG + coin) is one click away.
 - **Exit plan for an open position**: enter the market cap you opened at (plus your lower bound) and get where the
-  position stands (in / above / below the range, worth in dollars, coin vs USDG) and three scenarios — the bounce
-  stalls (good exit just under the first strong resistance), breakout (next level / automatic exit at the top), drop
-  (close if the floor breaks) — with the dollar value at each level and how often the price got there in a night like
-  this. Resistance now includes old floors the price fell through (tested: 2+ broken floors held ~45% vs 28% random).
+  position stands and one answer — hold (it exits by itself at the top of your range), take profit by hand just under
+  a strong resistance, or close — plus a price ladder (top of range, take-profit level, now, close level, bottom) with
+  your LP's dollar value at each level and how often the price got there in a night like this. The close level is a
+  strong floor that breaks on 1 in 4 nights or fewer, so a normal dip does not trigger it. Resistance now includes old floors the price fell through (tested: 2+ broken floors held ~45% vs 28% random).
 - **Safe LP range (two-sided)**: the tightest range that stayed in range for the whole night in at least 90% (80/95% selectable)
   of similar nights — from the coin's own history and similar moments in the sample coins — plus a 5–10% safety
   margin, compared with your usual lower bounds (-60/-65/-70%). Results in dollars include fees from real volume ×

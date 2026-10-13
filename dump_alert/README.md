@@ -277,13 +277,14 @@ buka (= batas atas untuk single-sided), range, dan market cap sekarang:
 - **Posisi di mana**: di dalam range (sebagian koin, sebagian USDG), di atas (100% USDG — tidak ada yang dijual), atau di
   bawah (100% koin, tidak dapat fee). Nilai posisi sekarang dalam dolar dan porsi koin vs USDG (rumus Uniswap v3/v4,
   belum termasuk fee yang sudah didapat).
-- **Skenario 1 — pantulan tertahan (good exit)**: zona resistance pertama di atas harga yang cukup kuat (menahan ≥40% di
-  uji sesuai momentum sekarang, minimal +5% dari harga sekarang), di bawah batas atas range. Tutup manual tepat di
-  bawah zona; nilainya dalam dolar dan peluang harga sampai ke sana selama jam tidur.
-- **Skenario 2 — tembus**: kalau ditutup 5%+ di atas level itu, target berikutnya; di batas atas LP otomatis 100% USDG.
-- **Skenario 3 — turun**: floor strong/medium terdekat di bawah harga; dianggap jebol 5% di bawah tepi bawah zonanya
-  (definisi yang sama dengan uji support) → tutup LP. Juga nilai di batas bawah range.
-- Grafik nilai posisi per market cap (vertikal), tabel semua level, dan satu baris di kotak jawaban paling atas.
+- **Satu jawaban**: *Hold — it exits by itself at …* (batas atas range, LP kembali 100% USDG sendiri), *Take profit by
+  hand at …* (resistance pertama yang cukup kuat — menahan ≥40% di uji sesuai momentum sekarang, minimal +5% dari harga
+  — di bawah batas atas range), *Nothing to do* (sudah 100% USDG), atau *Close it now* (vonis AVOID).
+- **Tangga harga** dari atas ke bawah: batas atas, level ambil untung, sekarang, level tutup, batas bawah — tiap baris
+  market cap, apa yang terjadi, nilai LP dalam dolar, dan seberapa sering harga sampai ke sana selama jam tidur.
+- **Level tutup**: floor strong/medium pertama di bawah harga yang jebolnya (5% di bawah tepi bawah zona, definisi yang
+  sama dengan uji support) hanya terjadi di ≤1 dari 4 malam serupa — turun biasa tidak memicu.
+- Semua level di bagian lipat *Details*, dan satu baris di kotak jawaban paling atas.
 
 CLI: `python -m dump_alert.lp_check <CA> --single --range 65 --entry-mcap 4.6M`.
 
