@@ -187,13 +187,14 @@ GUIDE = {
              ["<b>Take profit at</b>: the level to exit, just under the resistance zone (price and market cap).",
               "<b>Automatic exit</b>: set your LP's upper bound there. If the price climbs into the resistance, your LP sells "
               "the coin for USDG on the way up, even while you sleep.",
-              "<b>Strength</b>: strong = pushed the price back 3+ times this week (or 1–2 times with many holders at "
-              "break-even there, or 2+ old floors the price fell through — a broken floor often becomes a ceiling).",
-              "<b>Turned the price back in tests</b>: how often levels like this held when the price reached them (about 4 in "
-              "10; then the price usually fell ~20%).",
+              "<b>Strength</b>: strong = 3+ old floors the price fell through (a broken floor often becomes a ceiling), or 2+ "
+              "with many holders at break-even there. Only strong levels held more often than a random price in tests; how "
+              "often a level pushed the price back before did not predict anything.",
+              "<b>Turned the price back in tests</b>: how often levels like this held when the price reached them (strong: "
+              "about 5 in 10, a random price about 4 in 10; then the price usually fell ~20%).",
               "<b>Chance to reach</b>: how often the price touched that level during a night like this.",
-              "<b>Momentum now</b>: with strong momentum (RSI 70+ or volume 2x), only strong levels still held; medium and weak "
-              "ones usually broke. Overbought signals mean \"likely to break through\", not \"sell now\".",
+              "<b>Momentum now</b>: with strong momentum (RSI 70+ or volume 2x), strong levels still held about 4 in 10; "
+              "medium and weak ones usually broke. Overbought signals mean \"likely to break through\", not \"sell now\".",
               "The table lists every resistance up to +300%; the next level is your target if the first one breaks.",
               "The floor line is the exit on the way down."],
              ["A strong level within reach, calm momentum, upper bound set just under it."],
@@ -465,13 +466,14 @@ GUIDE = {
              ["<b>Take profit at</b>: level untuk keluar, tepat di bawah zona resistance (harga dan market cap).",
               "<b>Automatic exit</b>: pasang batas atas LP di situ. Kalau harga naik ke resistance, LP otomatis menjual koin "
               "jadi USDG saat harga naik, walau kamu sedang tidur.",
-              "<b>Strength</b>: strong = menolak harga 3+ kali minggu ini (atau 1–2 kali dengan banyak holder balik modal di "
-              "situ, atau ada 2+ floor lama yang sudah ditembus — floor yang jebol sering jadi atap).",
-              "<b>Turned the price back in tests</b>: seberapa sering level seperti ini menahan harga saat tersentuh (sekitar "
-              "4 dari 10; sesudahnya harga biasanya turun ~20%).",
+              "<b>Strength</b>: strong = 3+ floor lama yang sudah ditembus (floor yang jebol sering jadi atap), atau 2+ dengan "
+              "banyak holder balik modal di situ. Hanya level strong yang lebih sering menahan daripada harga acak saat diuji; "
+              "seberapa sering level itu dulu menolak harga ternyata tidak memprediksi apa-apa.",
+              "<b>Turned the price back in tests</b>: seberapa sering level seperti ini menahan harga saat tersentuh (strong: "
+              "sekitar 5 dari 10, harga acak sekitar 4 dari 10; sesudahnya harga biasanya turun ~20%).",
               "<b>Chance to reach</b>: seberapa sering harga menyentuh level itu dalam satu malam seperti ini.",
-              "<b>Momentum now</b>: saat momentum kencang (RSI 70+ atau volume 2x), hanya level strong yang masih bertahan; "
-              "medium dan weak biasanya tembus. Sinyal overbought artinya \"cenderung tembus\", bukan \"jual sekarang\".",
+              "<b>Momentum now</b>: saat momentum kencang (RSI 70+ atau volume 2x), level strong masih menahan sekitar 4 dari "
+              "10; medium dan weak biasanya tembus. Sinyal overbought artinya \"cenderung tembus\", bukan \"jual sekarang\".",
               "Tabel berisi semua resistance sampai +300%; level berikutnya jadi target kalau yang pertama tembus.",
               "Garis floor adalah titik keluar kalau harga turun."],
              ["Level strong yang terjangkau, momentum tenang, batas atas dipasang tepat di bawahnya."],

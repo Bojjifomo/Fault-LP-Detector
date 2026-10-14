@@ -911,8 +911,8 @@ def position_section(a):
                 pos_mcap(a, t["price"]), "—" if t["kind"] == "now" else f"{t['from_now'] * 100:+.0f}%",
                 dollars(pos * t["value"]), "—" if t["kind"] == "now" else nights(t["reach"])] for t in lv])
         ui('<p class="hl-small">Resistance = a price where the price was pushed back before, where many holders get their '
-           'money back, or an old floor the price fell through. "Strong" ones turned the price back about 4 in 10 times in '
-           'tests. The take-profit level is the first strong-enough resistance at least 5% above the price; the close level '
+           'money back, or an old floor the price fell through. "Strong" ones turned the price back about 5 in 10 times in '
+           'tests (a random price: about 4 in 10). The exit level is the first strong resistance at least 5% above the price; the close level '
            'is the first strong floor that the price reached on 1 in 4 nights or fewer, so a normal dip does not trigger it.</p>')
 
 
@@ -1500,9 +1500,10 @@ def exit_section(a):
         return
     mom = e["momentum"]
     ui(f'<div class="hl-note">Momentum now: <b>{"strong" if mom else "calm"}</b>. '
-       + ("In tests, when the price ran into a level with strong momentum (RSI 70+ or volume 2x), medium and weak levels "
-          "usually broke; only strong levels still held about 4 times in 10." if mom else
-          "In tests, when the price arrived calmly, strong and medium levels both turned it back about 4 times in 10.")
+       + ("In tests, when the price ran into a level with strong momentum (RSI 70+ or volume 2x), strong levels still "
+          "turned it back about 4 times in 10; medium and weak ones about 3 or fewer — no better than a random price." if mom else
+          "In tests, when the price arrived calmly, strong levels turned it back about 5 times in 10; medium and weak ones "
+          "about 4 in 10 — the same as a random price.")
        + "</div>")
     if take:
         z = take["zone"]
@@ -1582,8 +1583,9 @@ def resistance_details(a, e):
                 cell(k, "all")] for k in ("strong", "medium", "weak", "plain")])
         ui('<p class="hl-small">Resistance levels come from: prices that turned the price down 10%+ in the last 7 days, old '
            'floors the price has fallen through (a floor often becomes a ceiling), the all-time high, sell walls in the pools, '
-           'busy trading prices, and prices where many holders bought (they sell at break-even). Strong = pushed back 3+ times, '
-           'or 1–2 times with 3%+ of all coins at break-even there or 2+ old floors there. Tested on the '
+           'busy trading prices, and prices where many holders bought (they sell at break-even). Strong = 3+ old floors the '
+           'price fell through, or 2+ with 3%+ of all coins at break-even there; medium = 2 old floors or 3%+ of coins at '
+           'break-even. How often a level pushed the price back before did not predict anything. Tested on the '
            '24 sample coins every 2 hours: a level "held" when the price touched it within 24 hours, did not go more than 5% '
            'above it in the next 6 hours, and fell 5%+.</p>')
 
@@ -1610,7 +1612,7 @@ def exit_section_single(a, e):
     if stall:
         plan.append(("info", "On the way back up, a floor the price fell through often turns into a ceiling (in tests on the "
                              "sample coins, levels with 2+ broken floors turned the price back about 45% of the time, versus "
-                             "28% for a random level). Floors inside your range: " + ", ".join(
+                             "37% for a random level). Floors inside your range: " + ", ".join(
                                  f"{pct(z['drop'])} ({z['strength']}, mcap {money(z['price'] * sup, usd, qu)})" for z in stall)
                      + ". If the bounce stops under one of them and you don't want to wait, close the LP there by hand "
                        "(you get back part USDG, part coin)."))
@@ -2105,7 +2107,7 @@ def check_page(keys, ref):
                                    help="How much you plan to put in. Used to show results in dollars. In a small pool, "
                                         "a big position earns less per dollar because you share the fees with yourself.")
         conservative = c4.toggle("Extra careful mode", help="Says OK less often. In tests on busy coins, fewer crashes "
-                                 "slipped through as OK (3.5% instead of 8.4%).")
+                                 "slipped through as OK (4.0% instead of 8.4%).")
         c7, c8 = st.columns(2)
         entry_txt = c7.text_input("Already open? Market cap when you opened (optional)", placeholder="e.g. 8.38M",
                                   help="Have a position open already? Enter the market cap at the moment you opened it "

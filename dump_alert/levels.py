@@ -255,14 +255,17 @@ TIERS = ("weak", "medium", "strong")
 
 
 def res_tier(touches, under=None, wall_ratio=None, flips=0):
-    """Kekuatan zona resistance, dikalibrasi di riwayat 24 koin (resistance_test): 3+ penolakan 7 hari = kuat, 1-2 =
-    sedang, tanpa penolakan = lemah; >= 3% supply dipegang holder yang rugi di zona itu naik satu tingkat (terbukti:
-    menolak ±41% vs ±33% tanpa). Tembok jual LP >= 2,5x sekitarnya juga naik satu tingkat (mekanika pool; likuiditas
-    historis tidak tersimpan, belum bisa diuji). ATH sendiri tidak dinaikkan (di koin sampel ATH justru sering tembus).
-    Floor yang sudah ditembus jadi atap: >= 2 swing low 7 hari di zona itu naik satu tingkat (zona dengan 2+ floor
-    tembus menolak ±45% vs ±30% tanpa penolakan & tanpa floor; pemisahan tingkat jadi 27/35/43%)."""
-    tier = 2 if touches >= 3 else 1 if touches >= 1 else 0
-    if (under or 0) >= RES_UNDER or (wall_ratio or 0) >= 2.5 or (flips or 0) >= RES_FLIPS:
+    """Kekuatan zona resistance, dikalibrasi di riwayat 24 koin dengan harga pasar (resistance_test, 9.920 sentuhan):
+    - floor lama yang sudah ditembus jadi atap: 0 / 1 / 2+ / 3+ floor -> menolak 35% / 38% / 45% / 49%
+    - >= 3% supply dipegang holder yang rugi dengan harga beli di zona itu: 42% vs 37%
+    - jumlah penolakan 7 hari (swing high) TIDAK membedakan (0 / 1-2 / 3+ -> 38% / 40% / 37%; level acak 37%), jadi
+      tidak dipakai untuk tingkat (efek lama berasal dari harga pool USDG tipis yang tertahan).
+    strong = 3+ floor tembus, atau 2+ dengan holder rugi >= 3% (48%: tenang 50%, momentum 43%); medium = 2 floor
+    tembus atau holder rugi >= 3% (39%); sisanya weak (34%). Tembok jual LP >= 2,5x sekitarnya naik satu tingkat
+    (mekanika pool; likuiditas historis tidak tersimpan, belum bisa diuji)."""
+    flips, held = flips or 0, (under or 0) >= RES_UNDER
+    tier = 2 if flips >= RES_FLIPS + 1 or (flips >= RES_FLIPS and held) else 1 if flips >= RES_FLIPS or held else 0
+    if (wall_ratio or 0) >= 2.5:
         tier = min(2, tier + 1)
     return tier
 

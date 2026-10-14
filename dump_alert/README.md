@@ -112,45 +112,48 @@ AUC = seberapa baik momen yang diikuti dump ≥30% dalam 8 jam diurutkan di atas
 
 | | semua titik (24 koin) | 19 koin baru* | saat koin ramai (≥30 pembeli/2 jam) |
 |---|---|---|---|
-| Aturan lama saja | 0,70 | 0,72 | 0,53 |
-| **Model** | **0,86** (lebih baik di 22/24 koin) | **0,91** (19/19) | **0,77** (21/23) |
+| Aturan lama saja | 0,68 | 0,71 | 0,52 |
+| **Model** | **0,87** (lebih baik di 23/24 koin) | **0,90** (18/19) | **0,75** (22/23) |
 
 \* 19 koin dari user yang sama sekali tidak dipakai saat memilih fitur model — uji paling bersih.
 
 Kalibrasi (prediksi model vs dump yang benar-benar terjadi, semua koin, leave-one-token-out):
 
-| Model bilang | 0–10% | 10–20% | 20–35% | 35–50% | 50–70% | 70–100% |
-|---|---|---|---|---|---|---|
-| Dump nyata | 3% | 13% | 32% | 43% | 58% | 70% |
+| Model bilang | 0–10% | 10–20% | 20–35% | 35–50% | 50–100% |
+|---|---|---|---|---|---|
+| Dump nyata | 3% | 13% | 34% | 43% | 61% |
 
 Saat koin ramai (saat kamu biasa LP), dibanding aturan lama:
 
 | | waktu OK | dump saat OK | dump saat AVOID | dump yang lolos di OK |
 |---|---|---|---|---|
-| Aturan lama | 23% | 10,6% | 35,9% | 8,8% |
-| **Model + pengaman (default)** | **30%** | **7,8%** | **55,3%** | **8,4%** |
-| Mode konservatif | 18% | 5,4% | 40,7% | 3,5% |
+| Aturan lama | 26% | 10,5% | 34,9% | 9,7% |
+| **Model + pengaman (default)** | **32%** | **7,3%** | **55,0%** | **8,4%** |
+| Mode konservatif | 20% | 5,5% | 40,2% | 4,0% |
 
-Jumlah koin sampel vs akurasi (saat koin ramai): 3 koin 0,71 → 6 koin 0,74 → 12 koin 0,76 → 18 koin 0,77
-→ 23 koin 0,77. Akurasi sudah mendatar; sampel tambahan paling berguna kalau jenisnya berbeda (koin yang
+Jumlah koin sampel vs akurasi (saat koin ramai, diukur dengan data versi lama): 3 koin 0,71 → 6 koin 0,74 → 12 koin
+0,76 → 18 koin 0,77 → 23 koin 0,77. Akurasi sudah mendatar; sampel tambahan paling berguna kalau jenisnya berbeda (koin yang
 selamat, atau koin yang pernah kamu LP-kan beserta hasilnya). Kontribusi tiap koin sendiri-sendiri kecil
 (±0,002 AUC): model tidak bergantung pada satu koin.
 
-### Data apa yang membantu, apa yang tidak (24 koin, AUC median per koin & arah sama di berapa koin)
+### Data apa yang membantu, apa yang tidak (23 koin yang pernah crash, AUC median per koin & arah sama di berapa koin)
 
 | Membantu | AUC | | Tidak membantu | AUC |
 |---|---|---|---|---|
-| dekat ATH | 0,85 (24/24) | | EMA gap / tren EMA | ±0,49 |
-| pembeli & penjual unik 2 jam | 0,85 (24/24) | | VWAP | 0,50 |
-| umur koin (makin muda makin rawan) | 0,84 (23/24) | | divergence RSI | 0,50 |
-| cadangan pool kecil dibanding supply | 0,84 (22/24) | | pola retest ATH sendirian | 0,50 |
-| volatilitas 6 jam | 0,80 (23/24) | | perubahan likuiditas 6 jam | 0,50 |
-| wallet jam pertama masih pegang | 0,79 (19/24) | | | |
-| lebar Bollinger | 0,78 (22/24) | | | |
-| dominasi pembeli terbesar rendah | 0,78 (23/24) | | | |
-| sudah berlipat dari low 24 jam | 0,74 (23/24) | | | |
-| holder untung ≥3x | 0,71 (20/24) | | | |
-| dompet besar baru | 0,71 (24/24) | | | |
+| pembeli & penjual unik 2 jam | 0,87 (22–23/23) | | EMA gap / tren EMA | 0,49–0,59 (arah tidak konsisten) |
+| dekat ATH | 0,86 (23/23) | | VWAP | 0,51 |
+| cadangan pool kecil dibanding supply | 0,86 (23/23) | | divergence RSI | 0,50 |
+| umur koin (makin muda makin rawan) | 0,84 (23/23) | | pola retest ATH sendirian | 0,50 |
+| volatilitas 6 jam | 0,84 (23/23) | | perubahan likuiditas 6 jam | 0,52 |
+| lebar Bollinger | 0,81 (22/23) | | | |
+| dominasi pembeli terbesar rendah | 0,81 (22/23) | | | |
+| wallet jam pertama masih pegang | 0,79 (21/23) | | | |
+| sudah berlipat dari low 24 jam | 0,78 (22/23) | | | |
+| holder untung ≥3x | 0,71 (20/23) | | | |
+| dompet besar baru | 0,71 (23/23) | | | |
+
+(Dengan harga pasar, VERONA tidak punya penurunan ≥30% dalam 8 jam sama sekali — penurunan di data lama berasal dari
+pool USDG yang tipis — jadi uji fitur memakai 23 koin.)
 
 Indikator teknikal klasik (RSI, EMA, VWAP, struktur swing, divergence) hampir tidak memprediksi dump ≥30%
 dalam 8 jam di koin-koin ini; di website ditampilkan sebagai konteks.
@@ -189,8 +192,13 @@ utama. Sampel dari pool yang sedang kosong (likuiditas 0, harganya bisa sampai 1
 aktif dapat peringatan; pool USDG dicari ulang tiap 6 jam. Data lama (format market v2) dicari ulang pool-nya dan
 harganya disampel ulang kalau sumber harganya berubah.
 
-Catatan: riset di koin sampel (ranges.npz, reference.json) masih dibangun dari harga versi lama (81,7% riwayatnya dari
-pool USDG yang tipis); perlu ditarik ulang & dibangun ulang supaya memakai harga pasar.
+Riset di koin sampel (reference.json, analogs.json.gz, ranges.npz) **dibangun ulang dengan harga pasar** (14 Okt 2026).
+Sebelumnya 81,7% riwayat koin sampel dihargai dari pool USDG yang tipis; di beberapa koin harga itu tertahan berhari-hari
+(contoh WORLDIE: tetap $41K sementara pasar turun ke $7K). Untuk koin pembanding, sumber harga dipilih dari keramaian
+sepanjang riwayat (koin yang sudah mati sering tinggal punya transaksi di pool USDG). Pool vs koin dasar launchpad
+(ORBIO, META) atau saham token (GME, GOOGL, COST) dikonversi ke USD lewat pool koin itu. CRADLE, ZEAL, BELL, dan RSI
+tidak punya pool USDG aktif lagi, jadi harganya dalam ETH — tidak masalah untuk riset karena semua ukuran memakai
+perubahan relatif.
 
 ### Support & likuiditas
 
@@ -205,10 +213,10 @@ pool USDG yang tipis); perlu ditarik ulang & dibangun ulang supaya memakai harga
 
 | Zona (saat disentuh dalam 24 jam) | Bertahan* (24 koin) |
 |---|---|
-| strong (3+ pantulan) | 42% |
+| strong (3+ pantulan) | 45% |
 | medium (1–2 pantulan) | 37% |
-| weak (tanpa pantulan) | 19% |
-| level biasa (bukan zona) | 32% |
+| weak (tanpa pantulan) | 10% (sedikit sampel: 112) |
+| level biasa (bukan zona) | 36% |
 
 \* Bertahan = 6 jam sesudah disentuh harga tidak tembus >5% di bawah zona dan sempat memantul ≥5%.
 Di koin yang rawan dump, support lebih sering jebol daripada bertahan. Pakai untuk memilih batas bawah
@@ -232,12 +240,12 @@ Uji leave-one-coin-out (range dipilih hanya dari koin lain, dicek di koin X, jen
 
 | Range | Tetap di dalam range sepanjang malam | Menyentuh batas bawah |
 |---|---|---|
-| Range tersempit (tanpa jarak) | 89,4% | 4,6% |
-| + jarak 5% | 92,5% | 2,6% |
-| + jarak 10% | 94,2% | 1,5% |
-| batas bawah −60% (batas atas sama) | 94,0% | 1,1% |
-| batas bawah −65% | 94,4% | 0,7% |
-| batas bawah −70% | 94,7% | 0,4% |
+| Range tersempit (tanpa jarak) | 89,5% | 4,2% |
+| + jarak 5% | 92,4% | 2,4% |
+| + jarak 10% | 94,4% | 1,1% |
+| batas bawah −60% (batas atas sama) | 93,7% | 1,0% |
+| batas bawah −65% | 94,1% | 0,6% |
+| batas bawah −70% | 94,3% | 0,4% |
 
 Target 90% benar-benar menghasilkan ±90% di koin yang tidak dilihat. Untuk jendela 8 jam, batas bawah
 −60..−70% jarang tersentuh; range aman biasanya lebih sempit (fee lebih besar) dengan sedikit lebih sering
@@ -259,20 +267,20 @@ fee level 2%/hari, posisi 2% pool):
 
 | Batas bawah | Kena batas bawah | Rata-rata per malam | Malam buruk (1 dari 10) |
 |---|---|---|---|
-| terdekat (tanpa jarak) | 9,7% | −0,01% | −6,0% |
-| + 5% | 6,2% | +0,02% | −4,6% |
-| + 10% | 3,7% | +0,03% | −3,6% |
-| −60% | 1,1% | −0,36% | −2,2% |
-| −65% | 0,7% | −0,32% | −1,9% |
-| −70% | 0,4% | −0,29% | −1,7% |
+| terdekat (tanpa jarak) | 9,7% | −0,29% | −5,8% |
+| + 5% | 5,7% | −0,19% | −4,3% |
+| + 10% | 3,5% | −0,13% | −3,5% |
+| −60% | 1,0% | −0,38% | −2,0% |
+| −65% | 0,6% | −0,34% | −1,8% |
+| −70% | 0,4% | −0,31% | −1,6% |
 
 Target 90% menghasilkan ±90% di koin yang tidak dilihat. Batas bawah yang lebih dangkal mendapat fee per dolar lebih
-besar tapi lebih sering kena bawah; −60..−70% jarang kena tapi fee-nya lebih kecil — rata-ratanya mirip, malam
-buruknya lebih ringan. Hasil uji disimpan di `ranges.npz` (`safe_test_single`).
+besar tapi lebih sering kena bawah; −60..−70% jarang kena tapi fee-nya lebih kecil — rata-ratanya mirip (di fee
+2%/hari semuanya sedikit negatif: koin sampel rata-rata turun sesudah momen ramai), malam buruknya lebih ringan. Hasil uji disimpan di `ranges.npz` (`safe_test_single`).
 
 Exit single-sided: tidak ada koin yang dijual di atas harga sekarang. Kalau harga turun masuk range lalu kembali,
 LP otomatis menjual koin kembali jadi USDG sampai 0%. Floor di dalam range yang ditembus bisa jadi atap saat harga
-memantul (teruji: zona dengan 2+ floor yang sudah ditembus menolak harga ±45% vs ±28% level acak) — tempat menutup LP
+memantul (teruji: zona dengan 2+ floor yang sudah ditembus menolak harga ±45% vs ±37% level acak) — tempat menutup LP
 manual kalau tidak mau menunggu.
 
 CLI: `python -m dump_alert.lp_check <CA> --single --range 65`.
@@ -286,7 +294,7 @@ buka (= batas atas untuk single-sided), range, dan market cap sekarang:
   bawah (100% koin, tidak dapat fee). Nilai posisi sekarang dalam dolar dan porsi koin vs USDG (rumus Uniswap v3/v4,
   belum termasuk fee yang sudah didapat).
 - **Satu jawaban**: *Hold — it exits by itself at …* (batas atas range, LP kembali 100% USDG sendiri), *Take profit by
-  hand at …* (resistance pertama yang cukup kuat — menahan ≥40% di uji sesuai momentum sekarang, minimal +5% dari harga
+  hand at …* (resistance **strong** pertama — satu-satunya tingkat yang lebih sering menahan daripada harga acak — minimal +5% dari harga
   — di bawah batas atas range), *Nothing to do* (sudah 100% USDG), atau *Close it now* (vonis AVOID).
 - **Tangga harga** dari atas ke bawah: batas atas, level ambil untung, sekarang, level tutup, batas bawah — tiap baris
   market cap, apa yang terjadi, nilai LP dalam dolar, dan seberapa sering harga sampai ke sana selama jam tidur.
@@ -301,31 +309,33 @@ CLI: `python -m dump_alert.lp_check <CA> --single --range 65 --entry-mcap 4.6M`.
 Zona resistance di atas harga (±4%) dikumpulkan dari: harga yang menolak harga turun ≥10% dalam 7 hari terakhir
 (swing high), **floor lama yang sudah ditembus** (swing low 7 hari yang sekarang di atas harga), ATH, tembok jual di
 pool (likuiditas sisi atas ≥2,5x sekitarnya), harga dengan volume tinggi, dan **harga beli rata-rata holder yang sedang
-rugi** (mereka cenderung menjual saat balik modal; dihitung dari semua wallet). Kekuatan: 3+ penolakan = strong, 1–2 =
-medium, tanpa penolakan = weak; naik satu tingkat kalau ≥3% supply dipegang holder rugi di zona itu, atau ada ≥2 floor
-lama yang sudah ditembus (tembok jual juga, berdasarkan mekanika pool).
+rugi** (mereka cenderung menjual saat balik modal; dihitung dari semua wallet).
 
-Diuji di riwayat 24 koin tiap 2 jam (8.531 sentuhan): level "menahan" kalau dalam 6 jam setelah disentuh harga tidak
-tembus >5% di atas zona dan turun ≥5%.
+Diuji di riwayat 24 koin (harga pasar) tiap 2 jam, 9.920 sentuhan: level "menahan" kalau dalam 6 jam setelah disentuh
+harga tidak tembus >5% di atas zona dan turun ≥5%. Yang terbukti membedakan:
+
+- **floor lama yang sudah ditembus jadi atap**: 0 / 1 / 2+ / 3+ floor → menahan 35% / 38% / 45% / 49%
+- **≥3% supply dipegang holder yang rugi di zona itu**: 42% vs 37%
+- **jumlah penolakan 7 hari tidak membedakan** (0 / 1–2 / 3+ penolakan → 38% / 40% / 37%; level acak 37%). Di data
+  lama (harga pool USDG tipis yang sering tertahan) penolakan terlihat penting — itu efek harga yang tertahan.
+
+Kekuatan: **strong** = 3+ floor tembus, atau 2+ floor tembus dengan holder rugi ≥3%; **medium** = 2 floor tembus atau
+holder rugi ≥3%; sisanya **weak** (tembok jual LP ≥2,5x sekitarnya naik satu tingkat, berdasarkan mekanika pool).
 
 | Level | Datang tenang | Datang dengan momentum (RSI 1j ≥70 atau volume ≥2x) | Semua |
 |---|---|---|---|
-| strong | 44% | 43% | 43% |
-| medium | 42% | 25% | 35% |
-| weak | 35% | 14% | 27% |
-| level acak | 38% | 20% | 28% |
+| strong | 50% | 43% | 48% |
+| medium | 41% | 35% | 39% |
+| weak | 41% | 24% | 34% |
+| level acak | 42% | 32% | 37% |
 
-**Floor yang jebol jadi atap** (teruji): zona dengan 0 / 1 / 2+ floor lama yang sudah ditembus menahan harga 34% / 33% /
-45% (2+ floor: 46% datang tenang, 44% dengan momentum). Dengan aturan "2+ floor = naik satu tingkat", pemisahan
-strong / medium / weak jadi 43% / 35% / 27% (sebelumnya 42% / 38% / 29%).
+Jadi hanya level **strong** yang lebih sering menahan daripada harga acak; medium dan weak setara harga acak. Strong
+mengalahkan weak di 12 dari 17 koin yang punya cukup sentuhan keduanya. Saat menahan, harga biasanya turun ±20%. Sinyal
+"overbought" (RSI ≥70, volume melonjak, di atas pita Bollinger atas, jauh di atas EMA20) saat menyentuh resistance
+membuat level **lebih sering tembus** (menahan 30% saat RSI ≥70 vs 41% saat tidak) — momentum menembus level.
 
-Saat menahan, harga biasanya turun ±20%. Temuan penting: sinyal "overbought" (RSI ≥70, volume melonjak, di atas pita
-Bollinger atas, jauh di atas EMA20) saat menyentuh resistance justru membuat level **lebih sering tembus** (menahan
-27% saat RSI ≥70 vs 39% saat tidak) — momentum menembus level yang lemah. Jadi saat momentum kencang hanya level
-strong yang dipakai sebagai target.
-
-Level ambil untung = zona terdekat yang minimal +8% di atas harga dan menahan ≥40% sesuai momentum sekarang (kalau
-tidak ada, strong pertama), dipasang tepat di bawah zona. Saran: pasang batas atas LP di situ supaya LP otomatis
+Level ambil untung = zona **strong** terdekat yang minimal +8% di atas harga (maksimal +150%), dipasang tepat di bawah
+zona; kalau tidak ada zona strong, tidak ada saran ambil untung (pakai batas atas & alarm). Saran: pasang batas atas LP di situ supaya LP otomatis
 menjual ke USDG saat harga naik ke resistance. Peluang tersentuh dihitung dari riwayat koin itu dan situasi serupa.
 Hasil uji disimpan di `reference.json` (`python -m dump_alert.lp_check --resistance-test`).
 
@@ -351,13 +361,15 @@ Uji leave-one-coin-out (range untuk koin X dipilih hanya dari 23 koin lain), 8 j
 
 | Tingkat fee (full range) · posisi vs pool | Range optimal (+ skip) | Full range | −40% / +50% | Optimal > full range |
 |---|---|---|---|---|
-| 1%/hari · 0,5% | **+0,57%** / 0,6% | −0,88% / 3,8% | −3,69% / 5,6% | 19 dari 24 koin |
-| 1%/hari · 2% | **−0,03%** / 0,1% | −0,88% / 3,8% | −3,76% / 5,6% | 18 dari 24 |
-| 2%/hari · 0,5% | **+2,02%** / 0,8% | −0,63% / 3,7% | −2,64% / 4,9% | 20 dari 24 |
-| 2%/hari · 2% | **+0,52%** / 0,6% | −0,64% / 3,7% | −2,77% / 5,0% | 18 dari 24 |
-| 4%/hari · 0,5% | **+5,85%** / 2,9% | −0,13% / 3,6% | −0,60% / 4,3% | 21 dari 24 |
-| 4%/hari · 2% | **+3,24%** / 1,3% | −0,14% / 3,6% | −0,86% / 4,4% | 22 dari 24 |
-| 4%/hari · 10% | **+0,73%** / 0,4% | −0,21% / 3,6% | −1,86% / 4,7% | 18 dari 24 |
+| 1%/hari · 0,5% | **−0,07%** / 0,4% | −0,83% / 3,4% | −3,36% / 5,0% | 18 dari 24 koin |
+| 1%/hari · 2% | **−0,17%** / 0,1% | −0,83% / 3,4% | −3,43% / 5,0% | 17 dari 24 |
+| 1%/hari · 10% | **−0,25%** / 0,1% | −0,85% / 3,4% | −3,69% / 5,2% | 18 dari 24 |
+| 2%/hari · 0,5% | **+1,36%** / 0,7% | −0,59% / 3,3% | −2,34% / 4,5% | 21 dari 24 |
+| 2%/hari · 2% | **+0,45%** / 0,4% | −0,59% / 3,3% | −2,48% / 4,6% | 18 dari 24 |
+| 2%/hari · 10% | **+0,05%** / 0,1% | −0,63% / 3,4% | −2,98% / 4,8% | 16 dari 24 |
+| 4%/hari · 0,5% | **+4,90%** / 1,6% | −0,10% / 3,2% | −0,35% / 3,9% | 22 dari 24 |
+| 4%/hari · 2% | **+2,60%** / 1,0% | −0,12% / 3,2% | −0,62% / 4,0% | 22 dari 24 |
+| 4%/hari · 10% | **+0,69%** / 0,2% | −0,19% / 3,2% | −1,59% / 4,3% | 17 dari 24 |
 
 Temuan utama:
 

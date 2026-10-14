@@ -28,7 +28,7 @@ What it looks at:
   position stands and one answer — hold (it exits by itself at the top of your range), take profit by hand just under
   a strong resistance, or close — plus a price ladder (top of range, take-profit level, now, close level, bottom) with
   your LP's dollar value at each level and how often the price got there in a night like this. The close level is a
-  strong floor that breaks on 1 in 4 nights or fewer, so a normal dip does not trigger it. Resistance now includes old floors the price fell through (tested: 2+ broken floors held ~45% vs 28% random).
+  strong floor that breaks on 1 in 4 nights or fewer, so a normal dip does not trigger it. Resistance now includes old floors the price fell through (tested on market prices: 2+ broken floors held ~45% vs 37% for a random price; how often a level pushed the price back before did not predict anything).
 - **Safe LP range (two-sided)**: the tightest range that stayed in range for the whole night in at least 90% (80/95% selectable)
   of similar nights — from the coin's own history and similar moments in the sample coins — plus a 5–10% safety
   margin, compared with your usual lower bounds (-60/-65/-70%). Results in dollars include fees from real volume ×

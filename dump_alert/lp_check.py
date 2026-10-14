@@ -941,7 +941,6 @@ EXIT_SIGNALS = [
     ("sellers", "More selling than buying in the last 4 hours", lambda x: x.get("buy_share4") is not None and x["buy_share4"] < 0.5),
     ("lower_highs", "Chart makes lower highs (1h)", lambda x: (x.get("structure") or 0) == -1),
 ]
-HOLD_OK = 0.40   # zona yang dipakai untuk ambil untung: peluang menolak harga (uji) >= 40%
 MIN_TP = 0.08    # level ambil untung paling dekat: +8% dari harga sekarang
 OPEN_MIN_TP = 0.05  # posisi yang sudah dibuka: good exit minimal +5% (lebih dekat = praktis tutup sekarang)
 BREAK = 0.95     # floor dianggap jebol 5% di bawah tepi bawah zonanya (definisi yang sama dengan support_test)
@@ -968,8 +967,8 @@ def exit_plan(f, lv, rec, own, tview, flow, ref):
         z["hold"], z["hold_n"] = st.get("rate"), st.get("n")
     # ambil untung minimal +8% (ruang untuk fee; level yang lebih dekat praktis berarti keluar sekarang), maksimal +150%
     near = [z for z in zones if z["up"] * (1 - levels.ZONE) - levels.ZONE >= MIN_TP and z["up"] <= 1.5]
-    target = next((z for z in near if (z["hold"] or 0) >= HOLD_OK), None) or \
-        next((z for z in near if z["strength"] == "strong"), None) or (near[0] if near else None)
+    # hanya zona strong: di uji harga pasar hanya itu yang lebih sering menahan daripada harga acak (48% vs 37%)
+    target = next((z for z in near if z["strength"] == "strong"), None)
     nxt = next((z for z in zones if target and z["price"] > target["price"]), None)
     take = None
     if target:
@@ -1089,8 +1088,7 @@ def position_plan(f, entry_px, lower, upper, lv, rec, own, mom):
             if lo <= px * 1.02:
                 continue
             targets.append(row("resistance", lo, zone=z, hold=z.get("hold"),
-                               strong_enough=lo >= px * (1 + OPEN_MIN_TP) and
-                               ((z.get("hold") or 0) >= HOLD_OK or z["strength"] == "strong" and not mom)))
+                               strong_enough=lo >= px * (1 + OPEN_MIN_TP) and z["strength"] == "strong"))
         targets.append(row("top", pb))
     good = next((t for t in targets if t["kind"] == "resistance" and t["strong_enough"]), None) or \
         next((t for t in targets if t["kind"] == "top"), None)

@@ -400,6 +400,7 @@ class Fetcher:
         """Tarik/update data. Progres disimpan per tahap (dan juga saat gagal), jadi pengecekan
         berikutnya melanjutkan dari titik terakhir tanpa mengulang panggilan yang sudah dibayar.
         liquidity=False: lewati likuiditas pool & peta likuiditas (untuk alarm yang sering polling)."""
+        self.full_history = full  # koin pembanding: sumber harga dipilih dari keramaian sepanjang riwayat
         with path_lock(self.path):
             self.ds = load_json(self.path, {"token": self.token})  # bisa sudah diperbarui pengecekan lain
             try:
@@ -690,9 +691,20 @@ class Fetcher:
                              "tick_spacing": cands[p][3], "hooks": cands[p][4], "swaps": freq[p]}
                             for p in sorted(cands, key=lambda p: -freq[p]) if freq[p] or p == best]}
         if usdg:
-            # sumber harga: pool USDG terdalam, kecuali ada pool yang jauh lebih ramai (harga pasar)
-            active = max(cands, key=lambda p: (freq[p], freq_hist[p], USDG in cands[p][:2]))
-            src_pool = usdg[0] if freq[usdg[0]] * PRICE_POOL_RATIO >= freq[active] else active
+            # sumber harga: pool USDG terdalam, kecuali ada pool yang jauh lebih ramai (harga pasar). Pool vs koin dasar
+            # launchpad (mis. ORBIO, META) boleh, asal pool konversinya ke USDG ikut dipakai swap di transaksi sampel
+            # (pool konversi yang sepi bisa tertinggal juga).
+            # Koin pembanding (riwayat penuh) mewakili masa aktifnya, jadi dinilai dari keramaian sepanjang riwayat (koin
+            # yang sudah mati sering hanya tersisa transaksi di pool USDG); pengecekan live dinilai dari keramaian terbaru.
+            def usable(p):
+                if USDG in cands[p][:2] or is_eth(cands[p]):
+                    return True
+                s = self._source(p, cands[p], keys, freq, USDG)
+                return bool(s and s.get("bridge") and freq[s["bridge"]["pool_id"]] > 0)
+            major = [p for p in cands if usable(p)] or list(cands)
+            act = freq_hist if getattr(self, "full_history", False) else freq
+            active = max(major, key=lambda p: (act[p], freq[p], USDG in cands[p][:2]))
+            src_pool = usdg[0] if act[usdg[0]] * PRICE_POOL_RATIO >= act[active] else active
             src = self._source(src_pool, cands[src_pool], keys, freq, USDG)
             if src is None:
                 src_pool, src = usdg[0], self._source(usdg[0], cands[usdg[0]], keys, freq, USDG)
